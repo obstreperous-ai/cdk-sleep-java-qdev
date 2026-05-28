@@ -56,5 +56,12 @@
           <version>${junit.version}</version>
           <scope>test</scope>
         </dependency>
+
+        <dependency>
+          <groupId>software.amazon.awscdk</groupId>
+          <artifactId>assertions</artifactId>
+          <version>${cdk.version}</version>
+          <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>
