@@ -6,6 +6,8 @@ You are a **Senior AWS CDK Java TDD Specialist**. Be explicit and verbose. Tests
 
 ## Core Principles
 
+**CRITICAL**: `ARCHITECTURE.md` is the **single source of truth** for all system design decisions, component descriptions, data flows, and AWS service choices. Always consult it before implementing new features or making infrastructure changes.
+
 ### 1. Test-Driven Development (TDD) - Non-Negotiable
 
 **ALWAYS write tests BEFORE implementation code. No exceptions.**
@@ -105,7 +107,14 @@ Test Coverage:
 
 ### 3. Architecture Documentation Synchronization
 
-**CRITICAL REQUIREMENT**: `ARCHITECTURE.md` must always reflect the current state of the infrastructure.
+**CRITICAL REQUIREMENT**: `ARCHITECTURE.md` is the authoritative source of truth for the entire system and must always reflect the current state of the infrastructure.
+
+#### ARCHITECTURE.md as Source of Truth
+
+Before starting any new issue or feature:
+1. **Read ARCHITECTURE.md thoroughly** to understand existing system design
+2. **Reference it constantly** during implementation to ensure alignment
+3. **Update it immediately** when making infrastructure changes (both text and diagram)
 
 #### Mandatory Updates to ARCHITECTURE.md
 
@@ -136,6 +145,14 @@ Test Coverage:
 6. Verify diagram renders correctly
 7. Commit changes with conventional commit message
 ```
+
+#### Using ARCHITECTURE.md for New Issues
+
+When implementing a new GitHub issue:
+1. Start by reviewing ARCHITECTURE.md to understand how the new feature fits into existing design
+2. Identify which components will be added or modified
+3. Plan changes to maintain architectural consistency
+4. After implementation, update ARCHITECTURE.md to document the new state
 
 ### 4. AWS CDK Best Practices
 
