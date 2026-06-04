@@ -10,6 +10,11 @@ import software.amazon.awscdk.services.s3.EventBridgeConfiguration;
 import software.amazon.awscdk.services.s3.BlockPublicAccess;
 import software.amazon.awscdk.services.events.Rule;
 import software.amazon.awscdk.services.events.EventPattern;
+import software.amazon.awscdk.services.dynamodb.Table;
+import software.amazon.awscdk.services.dynamodb.Attribute;
+import software.amazon.awscdk.services.dynamodb.AttributeType;
+import software.amazon.awscdk.services.dynamodb.BillingMode;
+import software.amazon.awscdk.services.dynamodb.TableEncryption;
 import software.amazon.awscdk.services.events.targets.SfnStateMachine;
 import software.amazon.awscdk.services.events.RuleTargetInput;
 import software.amazon.awscdk.services.logs.LogGroup;
@@ -21,6 +26,8 @@ import software.amazon.awscdk.services.stepfunctions.LogLevel;
 import software.amazon.awscdk.services.stepfunctions.Chain;
 import software.amazon.awscdk.services.stepfunctions.tasks.CallAwsService;
 import software.amazon.awscdk.services.stepfunctions.Succeed;
+import software.amazon.awscdk.services.stepfunctions.tasks.DynamoPutItem;
+import software.amazon.awscdk.services.stepfunctions.tasks.DynamoAttributeValue;
 import software.amazon.awscdk.services.iam.PolicyStatement;
 import software.amazon.awscdk.services.iam.Effect;
 
@@ -33,6 +40,7 @@ public class CdkBaseStack extends Stack {
     private final Bucket inputBucket;
     private final Bucket outputBucket;
     private final Rule eventBridgeRule;
+    private final Table metadataTable;
     private final StateMachine stateMachine;
     
     public CdkBaseStack(final Construct scope, final String id) {
@@ -61,6 +69,18 @@ public class CdkBaseStack extends Stack {
                 .autoDeleteObjects(true) // For dev - cleanup on stack deletion
                 .build();
 
+        // DynamoDB Table - stores audio pipeline metadata
+        metadataTable = Table.Builder.create(this, "SleepAudioMetadataTable")
+                .partitionKey(Attribute.builder()
+                        .name("audioId")
+                        .type(AttributeType.STRING)
+                        .build())
+                .billingMode(BillingMode.PAY_PER_REQUEST)
+                .encryption(TableEncryption.AWS_MANAGED)
+                .pointInTimeRecovery(true)
+                .removalPolicy(RemovalPolicy.DESTROY) // For dev - should be configurable
+                .build();
+
         // CloudWatch Log Group for EventBridge rule (placeholder target)
         // CloudWatch Log Group for Step Functions state machine
         LogGroup stateMachineLogGroup = LogGroup.Builder.create(this, "SleepAudioStateMachineLogGroup")
@@ -69,9 +89,23 @@ public class CdkBaseStack extends Stack {
 
         // EventBridge Rule - triggers on S3 ObjectCreated events from input bucket
         // Step Functions State Machine - Orchestrates the audio processing pipeline
-        // Start with minimal Polly integration following TDD
+        // Now includes DynamoDB metadata storage (Issue #5)
         
-        // Define Polly task using CallAwsService for SynthesizeSpeech
+        // Task 1: Write initial metadata to DynamoDB
+        DynamoPutItem putMetadataTask = DynamoPutItem.Builder.create(this, "WriteInitialMetadata")
+                .table(metadataTable)
+                .item(Map.of(
+                    "audioId", DynamoAttributeValue.fromString(software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.key")),
+                    "status", DynamoAttributeValue.fromString("PROCESSING"),
+                    "inputBucket", DynamoAttributeValue.fromString(software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.bucket")),
+                    "inputKey", DynamoAttributeValue.fromString(software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.key")),
+                    "createdAt", DynamoAttributeValue.fromString(software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.eventTime"))
+                ))
+                .resultPath("$.dynamoResult")
+                .comment("Write initial metadata record when pipeline starts")
+                .build();
+        
+        // Task 2: Polly task using CallAwsService for SynthesizeSpeech
         CallAwsService pollyTask = CallAwsService.Builder.create(this, "PollyTextToSpeech")
                 .service("polly")
                 .action("synthesizeSpeech")
@@ -92,8 +126,8 @@ public class CdkBaseStack extends Stack {
         
         // Define the workflow chain: Start -> Polly Task -> Success
         Chain definition = Chain.start(pollyTask).next(successState);
-        
-        // Create the state machine
+        // Define the workflow chain: Start -> DynamoDB Write -> Polly Task -> Success
+        Chain definition = Chain.start(putMetadataTask).next(pollyTask).next(successState);
         stateMachine = StateMachine.Builder.create(this, "SleepAudioPipelineStateMachine")
                 .definition(definition)
                 .stateMachineType(StateMachineType.STANDARD)
@@ -104,7 +138,7 @@ public class CdkBaseStack extends Stack {
                         .build())
                 .tracingEnabled(true)
                 .comment("Orchestrates sleep audio processing with Polly integration")
-                .build();
+                .comment("Orchestrates sleep audio processing with DynamoDB metadata and Polly integration")
         
         // Add explicit Polly permissions to the state machine role (least privilege)
         stateMachine.addToRolePolicy(PolicyStatement.Builder.create()
@@ -113,6 +147,9 @@ public class CdkBaseStack extends Stack {
                 .resources(List.of("*"))
                 .build());
         
+        
+        // Grant state machine read/write access to DynamoDB table
+        metadataTable.grantReadWriteData(stateMachine);
         // Grant state machine read access to input bucket (for future processing)
         inputBucket.grantRead(stateMachine);
         
