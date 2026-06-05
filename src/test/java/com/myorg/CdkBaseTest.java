@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * TDD Test Suite for Issues #3 and #4
+ * TDD Test Suite for Issues #3, #4, and #5
  * 
  * Issue #4: Step Functions State Machine + Polly Integration (TDD)
  * These tests are written FIRST (before implementation) following strict TDD.
@@ -264,6 +264,142 @@ public class CdkBaseTest {
                             Match.objectLike(
                                 new HashMap<String, Object>() {{
                                     put("Action", "polly:SynthesizeSpeech");
+                                }}
+                            )
+                        )));
+                    }}
+                ));
+            }}
+        ));
+    }
+
+    // ======================================================================
+    // Issue #5: DynamoDB Metadata Table + State Machine I/O Handling (TDD)
+    // These tests are written FIRST before implementation (strict TDD)
+    // ======================================================================
+
+    /**
+     * Test: DynamoDB table should exist for storing audio metadata
+     */
+    @Test
+    public void testDynamoDBTableExists() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify DynamoDB table resource exists
+        template.resourceCountIs("AWS::DynamoDB::Table", 1);
+    }
+
+    /**
+     * Test: DynamoDB table should have correct key schema (partition key)
+     */
+    @Test
+    public void testDynamoDBTableHasCorrectKeySchema() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify table has partition key defined
+        template.hasResourceProperties("AWS::DynamoDB::Table", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("KeySchema", Match.arrayWith(List.of(
+                    Match.objectLike(
+                        new HashMap<String, Object>() {{
+                            put("AttributeName", "audioId");
+                            put("KeyType", "HASH");
+                        }}
+                    )
+                )));
+                put("AttributeDefinitions", Match.arrayWith(List.of(
+                    Match.objectLike(
+                        new HashMap<String, Object>() {{
+                            put("AttributeName", "audioId");
+                            put("AttributeType", "S");
+                        }}
+                    )
+                )));
+            }}
+        ));
+    }
+
+    /**
+     * Test: DynamoDB table should have on-demand billing mode
+     */
+    @Test
+    public void testDynamoDBTableHasOnDemandBilling() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify billing mode is PAY_PER_REQUEST (on-demand)
+        template.hasResourceProperties("AWS::DynamoDB::Table", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("BillingMode", "PAY_PER_REQUEST");
+            }}
+        ));
+    }
+
+    /**
+     * Test: DynamoDB table should have server-side encryption enabled
+     */
+    @Test
+    public void testDynamoDBTableHasEncryption() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify SSE is enabled
+        template.hasResourceProperties("AWS::DynamoDB::Table", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("SSESpecification", Match.objectLike(
+                    new HashMap<String, Object>() {{
+                        put("SSEEnabled", true);
+                    }}
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: DynamoDB table should have point-in-time recovery enabled
+     */
+    @Test
+    public void testDynamoDBTableHasPointInTimeRecovery() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify PITR is enabled
+        template.hasResourceProperties("AWS::DynamoDB::Table", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("PointInTimeRecoverySpecification", Match.objectLike(
+                    new HashMap<String, Object>() {{
+                        put("PointInTimeRecoveryEnabled", true);
+                    }}
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: State machine should have DynamoDB permissions in IAM policy
+     */
+    @Test
+    public void testStateMachineHasDynamoDBPermissions() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify IAM policy includes DynamoDB PutItem permission
+        template.hasResourceProperties("AWS::IAM::Policy", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("PolicyDocument", Match.objectLike(
+                    new HashMap<String, Object>() {{
+                        put("Statement", Match.arrayWith(List.of(
+                            Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    put("Action", "dynamodb:PutItem");
                                 }}
                             )
                         )));
