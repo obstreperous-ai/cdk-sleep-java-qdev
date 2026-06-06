@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * TDD Test Suite for Issues #3, #4, and #5
+ * TDD Test Suite for Issues #3, #4, #5, and #6
  * 
  * Issue #4: Step Functions State Machine + Polly Integration (TDD)
  * These tests are written FIRST (before implementation) following strict TDD.
@@ -400,6 +400,194 @@ public class CdkBaseTest {
                             Match.objectLike(
                                 new HashMap<String, Object>() {{
                                     put("Action", "dynamodb:PutItem");
+                                }}
+                            )
+                        )));
+                    }}
+                ));
+            }}
+        ));
+    }
+
+    // ======================================================================
+    // Issue #6: SNS Notifications + Error Handling & Status Updates (TDD)
+    // These tests are written FIRST before implementation (strict TDD)
+    // ======================================================================
+
+    /**
+     * Test: Two SNS topics should exist for pipeline completion and failure
+     */
+    @Test
+    public void testSNSTopicsExist() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify exactly 2 SNS topics exist
+        template.resourceCountIs("AWS::SNS::Topic", 2);
+    }
+
+    /**
+     * Test: SNS topics should have encryption enabled
+     */
+    @Test
+    public void testSNSTopicsEncrypted() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify SNS topics have KMS encryption enabled
+        template.hasResourceProperties("AWS::SNS::Topic", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("KmsMasterKeyId", Match.anyValue());
+            }}
+        ));
+    }
+
+    /**
+     * Test: State machine should have error handling (Catch blocks)
+     */
+    @Test
+    public void testStateMachineHasErrorHandling() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify state machine definition includes error handling
+        // The definition string should contain "Catch" keyword
+        template.hasResourceProperties("AWS::StepFunctions::StateMachine", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("DefinitionString", Match.serializedJson(
+                    Match.objectLike(
+                        new HashMap<String, Object>() {{
+                            put("States", Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    // At least one state should have a Catch block
+                                    put("PollyTextToSpeech", Match.objectLike(
+                                        new HashMap<String, Object>() {{
+                                            put("Catch", Match.anyValue());
+                                        }}
+                                    ));
+                                }}
+                            ));
+                        }}
+                    )
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: State machine should include DynamoDB status update tasks
+     */
+    @Test
+    public void testStateMachineHasDynamoDBStatusUpdateTasks() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify state machine definition includes DynamoDB UpdateItem tasks
+        template.hasResourceProperties("AWS::StepFunctions::StateMachine", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("DefinitionString", Match.serializedJson(
+                    Match.objectLike(
+                        new HashMap<String, Object>() {{
+                            put("States", Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    // Should have a task for updating status to COMPLETED
+                                    put("UpdateStatusCompleted", Match.objectLike(
+                                        new HashMap<String, Object>() {{
+                                            put("Type", "Task");
+                                            put("Resource", Match.stringLikeRegexp(".*states:dynamodb:updateItem.*"));
+                                        }}
+                                    ));
+                                }}
+                            ));
+                        }}
+                    )
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: State machine should include SNS publish tasks
+     */
+    @Test
+    public void testStateMachineHasSNSPublishTasks() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify state machine definition includes SNS Publish tasks
+        template.hasResourceProperties("AWS::StepFunctions::StateMachine", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("DefinitionString", Match.serializedJson(
+                    Match.objectLike(
+                        new HashMap<String, Object>() {{
+                            put("States", Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    // Should have a task for publishing success notification
+                                    put("PublishSuccessNotification", Match.objectLike(
+                                        new HashMap<String, Object>() {{
+                                            put("Type", "Task");
+                                            put("Resource", Match.stringLikeRegexp(".*states:sns:publish.*"));
+                                        }}
+                                    ));
+                                }}
+                            ));
+                        }}
+                    )
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: State machine IAM role should have SNS publish permissions
+     */
+    @Test
+    public void testStateMachineHasSNSPermissions() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify IAM policy includes SNS publish permissions
+        template.hasResourceProperties("AWS::IAM::Policy", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("PolicyDocument", Match.objectLike(
+                    new HashMap<String, Object>() {{
+                        put("Statement", Match.arrayWith(List.of(
+                            Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    put("Action", "sns:Publish");
+                                }}
+                            )
+                        )));
+                    }}
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: State machine IAM role should have DynamoDB UpdateItem permissions
+     */
+    @Test
+    public void testStateMachineHasDynamoDBUpdatePermissions() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify IAM policy includes DynamoDB UpdateItem permission
+        template.hasResourceProperties("AWS::IAM::Policy", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("PolicyDocument", Match.objectLike(
+                    new HashMap<String, Object>() {{
+                        put("Statement", Match.arrayWith(List.of(
+                            Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    put("Action", "dynamodb:UpdateItem");
                                 }}
                             )
                         )));

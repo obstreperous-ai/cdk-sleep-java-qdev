@@ -7,6 +7,8 @@ import software.amazon.awscdk.RemovalPolicy;
 import software.amazon.awscdk.services.s3.Bucket;
 import software.amazon.awscdk.services.s3.BucketEncryption;
 import software.amazon.awscdk.services.s3.EventBridgeConfiguration;
+import software.amazon.awscdk.services.kms.Key;
+import software.amazon.awscdk.services.sns.Topic;
 import software.amazon.awscdk.services.s3.BlockPublicAccess;
 import software.amazon.awscdk.services.events.Rule;
 import software.amazon.awscdk.services.events.EventPattern;
@@ -27,6 +29,10 @@ import software.amazon.awscdk.services.stepfunctions.Chain;
 import software.amazon.awscdk.services.stepfunctions.tasks.CallAwsService;
 import software.amazon.awscdk.services.stepfunctions.Succeed;
 import software.amazon.awscdk.services.stepfunctions.tasks.DynamoPutItem;
+import software.amazon.awscdk.services.stepfunctions.Fail;
+import software.amazon.awscdk.services.stepfunctions.tasks.DynamoUpdateItem;
+import software.amazon.awscdk.services.stepfunctions.tasks.SnsPublish;
+import software.amazon.awscdk.services.stepfunctions.Catch;
 import software.amazon.awscdk.services.stepfunctions.tasks.DynamoAttributeValue;
 import software.amazon.awscdk.services.iam.PolicyStatement;
 import software.amazon.awscdk.services.iam.Effect;
@@ -42,6 +48,8 @@ public class CdkBaseStack extends Stack {
     private final Rule eventBridgeRule;
     private final Table metadataTable;
     private final StateMachine stateMachine;
+    private final Topic completedTopic;
+    private final Topic failedTopic;
     
     public CdkBaseStack(final Construct scope, final String id) {
         this(scope, id, null);
@@ -81,6 +89,25 @@ public class CdkBaseStack extends Stack {
                 .removalPolicy(RemovalPolicy.DESTROY) // For dev - should be configurable
                 .build();
 
+        // KMS Key for SNS encryption
+        Key snsKmsKey = Key.Builder.create(this, "SleepAudioSNSKey")
+                .description("KMS key for Sleep Audio SNS topic encryption")
+                .enableKeyRotation(true)
+                .removalPolicy(RemovalPolicy.DESTROY)
+                .build();
+
+        // SNS Topic for pipeline completion notifications
+        completedTopic = Topic.Builder.create(this, "SleepAudioPipelineCompleted")
+                .displayName("Sleep Audio Pipeline Completed")
+                .masterKey(snsKmsKey)
+                .build();
+
+        // SNS Topic for pipeline failure notifications
+        failedTopic = Topic.Builder.create(this, "SleepAudioPipelineFailed")
+                .displayName("Sleep Audio Pipeline Failed")
+                .masterKey(snsKmsKey)
+                .build();
+
         // CloudWatch Log Group for EventBridge rule (placeholder target)
         // CloudWatch Log Group for Step Functions state machine
         LogGroup stateMachineLogGroup = LogGroup.Builder.create(this, "SleepAudioStateMachineLogGroup")
@@ -89,7 +116,7 @@ public class CdkBaseStack extends Stack {
 
         // EventBridge Rule - triggers on S3 ObjectCreated events from input bucket
         // Step Functions State Machine - Orchestrates the audio processing pipeline
-        // Now includes DynamoDB metadata storage (Issue #5)
+        // Now includes DynamoDB metadata storage, SNS notifications, and error handling (Issue #5, #6)
         
         // Task 1: Write initial metadata to DynamoDB
         DynamoPutItem putMetadataTask = DynamoPutItem.Builder.create(this, "WriteInitialMetadata")
@@ -106,6 +133,7 @@ public class CdkBaseStack extends Stack {
                 .build();
         
         // Task 2: Polly task using CallAwsService for SynthesizeSpeech
+        // Error handling with Catch block will be added below
         CallAwsService pollyTask = CallAwsService.Builder.create(this, "PollyTextToSpeech")
                 .service("polly")
                 .action("synthesizeSpeech")
@@ -118,25 +146,104 @@ public class CdkBaseStack extends Stack {
                 .iamResources(List.of("*"))
                 .resultPath("$.pollyResult")
                 .build();
-        
-        // Success state
-        Succeed successState = Succeed.Builder.create(this, "ProcessingComplete")
-                .comment("Audio processing completed successfully")
+
+        // Task 3: Update DynamoDB status to COMPLETED
+        DynamoUpdateItem updateStatusCompleted = DynamoUpdateItem.Builder.create(this, "UpdateStatusCompleted")
+                .table(metadataTable)
+                .key(Map.of(
+                    "audioId", DynamoAttributeValue.fromString(software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.key"))
+                ))
+                .updateExpression("SET #status = :completed, #updatedAt = :updatedAt")
+                .expressionAttributeNames(Map.of(
+                    "#status", "status",
+                    "#updatedAt", "updatedAt"
+                ))
+                .expressionAttributeValues(Map.of(
+                    ":completed", DynamoAttributeValue.fromString("COMPLETED"),
+                    ":updatedAt", DynamoAttributeValue.fromString(software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$$.State.EnteredTime"))
+                ))
+                .resultPath("$.updateResult")
+                .comment("Update status to COMPLETED after successful processing")
+                .build();
+
+        // Task 4: Publish success notification to SNS
+        SnsPublish publishSuccessNotification = SnsPublish.Builder.create(this, "PublishSuccessNotification")
+                .topic(completedTopic)
+                .message(software.amazon.awscdk.services.stepfunctions.TaskInput.fromJsonPathAt("$"))
+                .subject("Sleep Audio Pipeline Completed")
+                .resultPath("$.snsResult")
+                .comment("Notify via SNS that pipeline completed successfully")
+                .build();
+
+        // Task 5: Update DynamoDB status to FAILED (for error path)
+        DynamoUpdateItem updateStatusFailed = DynamoUpdateItem.Builder.create(this, "UpdateStatusFailed")
+                .table(metadataTable)
+                .key(Map.of(
+                    "audioId", DynamoAttributeValue.fromString(software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.key"))
+                ))
+                .updateExpression("SET #status = :failed, #updatedAt = :updatedAt, #errorInfo = :errorInfo")
+                .expressionAttributeNames(Map.of(
+                    "#status", "status",
+                    "#updatedAt", "updatedAt",
+                    "#errorInfo", "errorInfo"
+                ))
+                .expressionAttributeValues(Map.of(
+                    ":failed", DynamoAttributeValue.fromString("FAILED"),
+                    ":updatedAt", DynamoAttributeValue.fromString(software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$$.State.EnteredTime")),
+                    ":errorInfo", DynamoAttributeValue.fromString(software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.errorMessage"))
+                ))
+                .resultPath("$.updateResult")
+                .comment("Update status to FAILED after error")
+                .build();
+
+        // Task 6: Publish failure notification to SNS
+        SnsPublish publishFailureNotification = SnsPublish.Builder.create(this, "PublishFailureNotification")
+                .topic(failedTopic)
+                .message(software.amazon.awscdk.services.stepfunctions.TaskInput.fromJsonPathAt("$"))
+                .subject("Sleep Audio Pipeline Failed")
+                .resultPath("$.snsResult")
+                .comment("Notify via SNS that pipeline failed")
                 .build();
         
-        // Define the workflow chain: Start -> Polly Task -> Success
-        Chain definition = Chain.start(pollyTask).next(successState);
-        // Define the workflow chain: Start -> DynamoDB Write -> Polly Task -> Success
-        Chain definition = Chain.start(putMetadataTask).next(pollyTask).next(successState);
+        // Final success state
+        Succeed successState = Succeed.Builder.create(this, "PipelineSucceeded")
+                .comment("Pipeline completed successfully")
+                .build();
+
+        // Final failure state
+        Fail failureState = Fail.Builder.create(this, "PipelineFailed")
+                .comment("Pipeline failed")
+                .cause("Processing error occurred")
+                .error("PipelineError")
+                .build();
+
+        // Define error handling: Polly task catches all errors
+        pollyTask.addCatch(
+            updateStatusFailed.next(publishFailureNotification).next(failureState),
+            Catch.Builder.builder()
+                .errors(List.of("States.ALL"))
+                .resultPath("$.errorMessage")
+                .build()
+        );
+
+        // Define the success workflow chain
+        Chain successChain = Chain.start(updateStatusCompleted)
+                .next(publishSuccessNotification)
+                .next(successState);
+
+        // Define the complete workflow
+        Chain definition = Chain.start(putMetadataTask)
+                .next(pollyTask)
+                .next(successChain);
+
         stateMachine = StateMachine.Builder.create(this, "SleepAudioPipelineStateMachine")
                 .definition(definition)
                 .stateMachineType(StateMachineType.STANDARD)
                 .logs(LogOptions.builder()
                         .destination(stateMachineLogGroup)
                         .level(LogLevel.ALL)
-                        .includeExecutionData(true)
-                        .build())
-                .tracingEnabled(true)
+                .comment("Orchestrates sleep audio processing with DynamoDB metadata, Polly integration, SNS notifications, and error handling")
+                .build();
                 .comment("Orchestrates sleep audio processing with Polly integration")
                 .comment("Orchestrates sleep audio processing with DynamoDB metadata and Polly integration")
         
@@ -145,6 +252,13 @@ public class CdkBaseStack extends Stack {
                 .effect(Effect.ALLOW)
                 .actions(List.of("polly:SynthesizeSpeech"))
                 .resources(List.of("*"))
+        // Add SNS publish permissions to the state machine role
+        stateMachine.addToRolePolicy(PolicyStatement.Builder.create()
+                .effect(Effect.ALLOW)
+                .actions(List.of("sns:Publish"))
+                .resources(List.of(completedTopic.getTopicArn(), failedTopic.getTopicArn()))
+                .build());
+        
                 .build());
         
         
