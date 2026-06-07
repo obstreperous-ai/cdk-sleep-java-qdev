@@ -41,6 +41,9 @@ import software.amazon.awscdk.services.lambda.Runtime;
 import software.amazon.awscdk.services.lambda.Code;
 import software.amazon.awscdk.services.stepfunctions.tasks.LambdaInvoke;
 
+import software.amazon.awscdk.services.stepfunctions.Pass;
+import software.amazon.awscdk.services.stepfunctions.Choice;
+import software.amazon.awscdk.services.stepfunctions.Condition;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
@@ -144,6 +147,46 @@ public class CdkBaseStack extends Stack {
         // Now includes DynamoDB metadata storage, Lambda processing, SNS notifications, and error handling (Issue #5, #6, #7)
         
         // Task 1: Write initial metadata to DynamoDB
+        // Task 0: Input Validation - Extract and validate input fields
+        Pass validateInput = Pass.Builder.create(this, "ValidateInput")
+                .comment("Validate and extract input fields from S3 event")
+                .parameters(Map.of(
+                    "bucket", software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.bucket"),
+                    "key", software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.key"),
+                    "eventTime", software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.eventTime"),
+                    "fileExtension", software.amazon.awscdk.services.stepfunctions.JsonPath.stringSplit(
+                        software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.key"), 
+                        "."
+                    )
+                ))
+                .resultPath("$.validation")
+                .build();
+        
+        // Pass state for validation failure
+        Pass validationFailed = Pass.Builder.create(this, "ValidationFailed")
+                .comment("File validation failed - unsupported format")
+                .parameters(Map.of(
+                    "bucket", software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.bucket"),
+                    "key", software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.key"),
+                    "errorMessage", "Unsupported file format. Supported formats: .mp3, .wav, .m4a, .flac"
+                ))
+                .resultPath("$")
+                .build();
+        
+        // Choice state for file extension validation
+        Choice checkFileExtension = Choice.Builder.create(this, "CheckFileExtension")
+                .comment("Check if file has supported extension")
+                .build();
+        
+        // Define supported file extensions
+        // Note: Step Functions doesn't have built-in extension checking, so we check for common patterns
+        Condition isSupportedFile = Condition.or(
+            Condition.stringMatches("$.key", "*.mp3"),
+            Condition.stringMatches("$.key", "*.wav"),
+            Condition.stringMatches("$.key", "*.m4a"),
+            Condition.stringMatches("$.key", "*.flac")
+        );
+        
         DynamoPutItem putMetadataTask = DynamoPutItem.Builder.create(this, "WriteInitialMetadata")
                 .table(metadataTable)
                 .item(Map.of(
@@ -278,12 +321,20 @@ public class CdkBaseStack extends Stack {
                 .next(publishSuccessNotification)
                 .next(successState);
 
-        // Define the complete workflow
-        Chain definition = Chain.start(putMetadataTask)
+        // Define error workflow for validation failures
+        Chain validationErrorChain = Chain.start(validationFailed)
+                .next(updateStatusFailed)
+                .next(publishFailureNotification)
+                .next(failureState);
+        
+        // Define the complete workflow with input validation
+        Chain definition = Chain.start(validateInput)
+                .next(checkFileExtension.when(isSupportedFile, Chain.start(putMetadataTask)
                 .next(processAudioTask)
                 .next(pollyTask)
-                .next(successChain);
-
+                .next(successChain))
+                .otherwise(validationErrorChain));
+        
         stateMachine = StateMachine.Builder.create(this, "SleepAudioPipelineStateMachine")
                 .definition(definition)
                 .stateMachineType(StateMachineType.STANDARD)
@@ -293,16 +344,17 @@ public class CdkBaseStack extends Stack {
                         .includeExecutionData(true)
                         .build())
                 .comment("Orchestrates sleep audio processing with Lambda, DynamoDB metadata, Polly integration, SNS notifications, and error handling")
-                .comment("Orchestrates sleep audio processing with DynamoDB metadata, Polly integration, SNS notifications, and error handling")
+                .build();
+                
         // Add explicit Polly permissions to the state machine role (least privilege)
         stateMachine.addToRolePolicy(PolicyStatement.Builder.create()
                 .effect(Effect.ALLOW)
                 .actions(List.of("polly:SynthesizeSpeech"))
                 .resources(List.of("*"))
-        // Add SNS publish permissions to the state machine role
                 .build());
         
-        stateMachine.addToRolePolicy(PolicyStatement.Builder.create()
+        // Add SNS publish permissions to the state machine role
+                stateMachine.addToRolePolicy(PolicyStatement.Builder.create()
                 .effect(Effect.ALLOW)
                 .actions(List.of("sns:Publish"))
                 .resources(List.of(completedTopic.getTopicArn(), failedTopic.getTopicArn()))

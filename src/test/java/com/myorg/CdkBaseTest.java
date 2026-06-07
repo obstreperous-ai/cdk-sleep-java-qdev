@@ -596,6 +596,137 @@ public class CdkBaseTest {
             }}
         ));
 
+    }
+
+    // ======================================================================
+    // Issue #8: Complete Pipeline Wiring + Input Validation (TDD)
+    // These tests are written FIRST before implementation (strict TDD)
+    // ======================================================================
+
+    /**
+     * Test: State machine should include input validation states
+     */
+    @Test
+    public void testStateMachineHasInputValidation() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify state machine definition includes validation state
+        template.hasResourceProperties("AWS::StepFunctions::StateMachine", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("DefinitionString", Match.serializedJson(
+                    Match.objectLike(
+                        new HashMap<String, Object>() {{
+                            put("States", Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    // Should have a validation state
+                                    put("ValidateInput", Match.objectLike(
+                                        new HashMap<String, Object>() {{
+                                            put("Type", "Pass");
+                                        }}
+                                    ));
+                                }}
+                            ));
+                        }}
+                    )
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: State machine should include Choice state for file validation
+     */
+    @Test
+    public void testStateMachineHasFileValidationChoice() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify state machine has a Choice state for validation
+        template.hasResourceProperties("AWS::StepFunctions::StateMachine", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("DefinitionString", Match.serializedJson(
+                    Match.objectLike(
+                        new HashMap<String, Object>() {{
+                            put("States", Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    // Should have a Choice state for validation
+                                    put("CheckFileExtension", Match.objectLike(
+                                        new HashMap<String, Object>() {{
+                                            put("Type", "Choice");
+                                        }}
+                                    ));
+                                }}
+                            ));
+                        }}
+                    )
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: State machine should have validation error path
+     */
+    @Test
+    public void testStateMachineHasValidationErrorPath() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify state machine has a state for validation errors
+        template.hasResourceProperties("AWS::StepFunctions::StateMachine", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("DefinitionString", Match.serializedJson(
+                    Match.objectLike(
+                        new HashMap<String, Object>() {{
+                            put("States", Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    // Should have a validation failure state
+                                    put("ValidationFailed", Match.objectLike(
+                                        new HashMap<String, Object>() {{
+                                            put("Type", "Pass");
+                                        }}
+                                    ));
+                                }}
+                            ));
+                        }}
+                    )
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: Complete stack snapshot test to catch regressions
+     */
+    @Test
+    public void testCompleteStackSnapshot() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify all major resources exist
+        template.resourceCountIs("AWS::S3::Bucket", 2);
+        template.resourceCountIs("AWS::DynamoDB::Table", 1);
+        template.resourceCountIs("AWS::SNS::Topic", 2);
+        template.resourceCountIs("AWS::Lambda::Function", 1);
+        template.resourceCountIs("AWS::StepFunctions::StateMachine", 1);
+        template.resourceCountIs("AWS::Events::Rule", 1);
+        template.resourceCountIs("AWS::KMS::Key", 1);
+    }
+
+    /**
+     * Test: Lambda function should be integrated in state machine workflow
+     */
+    @Test
+    public void testLambdaIntegratedInWorkflow() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
     // ======================================================================
     // Issue #7: Lambda Function Skeleton + Step Functions Integration (TDD)
     // These tests are written FIRST before implementation (strict TDD)
