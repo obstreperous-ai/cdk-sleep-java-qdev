@@ -36,6 +36,10 @@ import software.amazon.awscdk.services.stepfunctions.Catch;
 import software.amazon.awscdk.services.stepfunctions.tasks.DynamoAttributeValue;
 import software.amazon.awscdk.services.iam.PolicyStatement;
 import software.amazon.awscdk.services.iam.Effect;
+import software.amazon.awscdk.services.lambda.Function;
+import software.amazon.awscdk.services.lambda.Runtime;
+import software.amazon.awscdk.services.lambda.Code;
+import software.amazon.awscdk.services.stepfunctions.tasks.LambdaInvoke;
 
 import java.util.List;
 import java.util.Map;
@@ -50,6 +54,7 @@ public class CdkBaseStack extends Stack {
     private final StateMachine stateMachine;
     private final Topic completedTopic;
     private final Topic failedTopic;
+    private final Function audioProcessorLambda;
     
     public CdkBaseStack(final Construct scope, final String id) {
         this(scope, id, null);
@@ -108,6 +113,26 @@ public class CdkBaseStack extends Stack {
                 .masterKey(snsKmsKey)
                 .build();
 
+        // Lambda Function - Audio processor (placeholder for future processing logic)
+        audioProcessorLambda = Function.Builder.create(this, "SleepAudioProcessorFunction")
+                .runtime(Runtime.JAVA_17)
+                .handler("com.myorg.SleepAudioProcessor::handleRequest")
+                .code(Code.fromAsset("target/function.jar"))
+                .environment(Map.of(
+                    "TABLE_NAME", metadataTable.getTableName()
+                ))
+                .description("Processes sleep audio files - placeholder for metadata enrichment and validation")
+                .build();
+
+        // Grant Lambda permissions to access DynamoDB table
+        metadataTable.grantReadWriteData(audioProcessorLambda);
+
+        // Grant Lambda read access to input bucket
+        inputBucket.grantRead(audioProcessorLambda);
+
+        // Grant Lambda write access to output bucket
+        outputBucket.grantWrite(audioProcessorLambda);
+
         // CloudWatch Log Group for EventBridge rule (placeholder target)
         // CloudWatch Log Group for Step Functions state machine
         LogGroup stateMachineLogGroup = LogGroup.Builder.create(this, "SleepAudioStateMachineLogGroup")
@@ -116,7 +141,7 @@ public class CdkBaseStack extends Stack {
 
         // EventBridge Rule - triggers on S3 ObjectCreated events from input bucket
         // Step Functions State Machine - Orchestrates the audio processing pipeline
-        // Now includes DynamoDB metadata storage, SNS notifications, and error handling (Issue #5, #6)
+        // Now includes DynamoDB metadata storage, Lambda processing, SNS notifications, and error handling (Issue #5, #6, #7)
         
         // Task 1: Write initial metadata to DynamoDB
         DynamoPutItem putMetadataTask = DynamoPutItem.Builder.create(this, "WriteInitialMetadata")
@@ -132,7 +157,20 @@ public class CdkBaseStack extends Stack {
                 .comment("Write initial metadata record when pipeline starts")
                 .build();
         
-        // Task 2: Polly task using CallAwsService for SynthesizeSpeech
+        // Task 2: Invoke Lambda function for audio processing
+        LambdaInvoke processAudioTask = LambdaInvoke.Builder.create(this, "ProcessAudio")
+                .lambdaFunction(audioProcessorLambda)
+                .payload(software.amazon.awscdk.services.stepfunctions.TaskInput.fromObject(Map.of(
+                    "bucket", software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.bucket"),
+                    "key", software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.key"),
+                    "audioId", software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.key"),
+                    "eventTime", software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.eventTime")
+                )))
+                .resultPath("$.lambdaResult")
+                .comment("Process audio file and enrich metadata")
+                .build();
+
+        // Task 3: Polly task using CallAwsService for SynthesizeSpeech
         // Error handling with Catch block will be added below
         CallAwsService pollyTask = CallAwsService.Builder.create(this, "PollyTextToSpeech")
                 .service("polly")
@@ -147,7 +185,7 @@ public class CdkBaseStack extends Stack {
                 .resultPath("$.pollyResult")
                 .build();
 
-        // Task 3: Update DynamoDB status to COMPLETED
+        // Task 4: Update DynamoDB status to COMPLETED
         DynamoUpdateItem updateStatusCompleted = DynamoUpdateItem.Builder.create(this, "UpdateStatusCompleted")
                 .table(metadataTable)
                 .key(Map.of(
@@ -166,7 +204,7 @@ public class CdkBaseStack extends Stack {
                 .comment("Update status to COMPLETED after successful processing")
                 .build();
 
-        // Task 4: Publish success notification to SNS
+        // Task 5: Publish success notification to SNS
         SnsPublish publishSuccessNotification = SnsPublish.Builder.create(this, "PublishSuccessNotification")
                 .topic(completedTopic)
                 .message(software.amazon.awscdk.services.stepfunctions.TaskInput.fromJsonPathAt("$"))
@@ -175,7 +213,7 @@ public class CdkBaseStack extends Stack {
                 .comment("Notify via SNS that pipeline completed successfully")
                 .build();
 
-        // Task 5: Update DynamoDB status to FAILED (for error path)
+        // Task 6: Update DynamoDB status to FAILED (for error path)
         DynamoUpdateItem updateStatusFailed = DynamoUpdateItem.Builder.create(this, "UpdateStatusFailed")
                 .table(metadataTable)
                 .key(Map.of(
@@ -196,7 +234,7 @@ public class CdkBaseStack extends Stack {
                 .comment("Update status to FAILED after error")
                 .build();
 
-        // Task 6: Publish failure notification to SNS
+        // Task 7: Publish failure notification to SNS
         SnsPublish publishFailureNotification = SnsPublish.Builder.create(this, "PublishFailureNotification")
                 .topic(failedTopic)
                 .message(software.amazon.awscdk.services.stepfunctions.TaskInput.fromJsonPathAt("$"))
@@ -217,6 +255,15 @@ public class CdkBaseStack extends Stack {
                 .error("PipelineError")
                 .build();
 
+        // Define error handling: Lambda task catches errors
+        processAudioTask.addCatch(
+            updateStatusFailed.next(publishFailureNotification).next(failureState),
+            Catch.Builder.builder()
+                .errors(List.of("States.ALL"))
+                .resultPath("$.errorMessage")
+                .build()
+        );
+
         // Define error handling: Polly task catches all errors
         pollyTask.addCatch(
             updateStatusFailed.next(publishFailureNotification).next(failureState),
@@ -233,6 +280,7 @@ public class CdkBaseStack extends Stack {
 
         // Define the complete workflow
         Chain definition = Chain.start(putMetadataTask)
+                .next(processAudioTask)
                 .next(pollyTask)
                 .next(successChain);
 
@@ -242,29 +290,28 @@ public class CdkBaseStack extends Stack {
                 .logs(LogOptions.builder()
                         .destination(stateMachineLogGroup)
                         .level(LogLevel.ALL)
+                        .includeExecutionData(true)
+                        .build())
+                .comment("Orchestrates sleep audio processing with Lambda, DynamoDB metadata, Polly integration, SNS notifications, and error handling")
                 .comment("Orchestrates sleep audio processing with DynamoDB metadata, Polly integration, SNS notifications, and error handling")
-                .build();
-                .comment("Orchestrates sleep audio processing with Polly integration")
-                .comment("Orchestrates sleep audio processing with DynamoDB metadata and Polly integration")
-        
         // Add explicit Polly permissions to the state machine role (least privilege)
         stateMachine.addToRolePolicy(PolicyStatement.Builder.create()
                 .effect(Effect.ALLOW)
                 .actions(List.of("polly:SynthesizeSpeech"))
                 .resources(List.of("*"))
         // Add SNS publish permissions to the state machine role
+                .build());
+        
         stateMachine.addToRolePolicy(PolicyStatement.Builder.create()
                 .effect(Effect.ALLOW)
                 .actions(List.of("sns:Publish"))
                 .resources(List.of(completedTopic.getTopicArn(), failedTopic.getTopicArn()))
                 .build());
         
-                .build());
-        
-        
-        // Grant state machine read/write access to DynamoDB table
+
         metadataTable.grantReadWriteData(stateMachine);
         // Grant state machine read access to input bucket (for future processing)
+
         inputBucket.grantRead(stateMachine);
         
         // Grant state machine write access to output bucket (for future processing)

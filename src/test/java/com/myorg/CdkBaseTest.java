@@ -595,5 +595,172 @@ public class CdkBaseTest {
                 ));
             }}
         ));
+
+    // ======================================================================
+    // Issue #7: Lambda Function Skeleton + Step Functions Integration (TDD)
+    // These tests are written FIRST before implementation (strict TDD)
+    // ======================================================================
+
+    /**
+     * Test: Lambda function should exist for audio processing
+     */
+    @Test
+    public void testLambdaFunctionExists() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify Lambda function resource exists
+        template.resourceCountIs("AWS::Lambda::Function", 1);
+    }
+
+    /**
+     * Test: Lambda function should have correct runtime (Java 17)
+     */
+    @Test
+    public void testLambdaFunctionHasCorrectRuntime() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify Lambda uses Java 17 runtime
+        template.hasResourceProperties("AWS::Lambda::Function", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("Runtime", "java17");
+            }}
+        ));
+    }
+
+    /**
+     * Test: Lambda function should have correct handler configuration
+     */
+    @Test
+    public void testLambdaFunctionHasCorrectHandler() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify Lambda handler is set correctly
+        template.hasResourceProperties("AWS::Lambda::Function", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("Handler", "com.myorg.SleepAudioProcessor::handleRequest");
+            }}
+        ));
+    }
+
+    /**
+     * Test: Lambda function should have environment variables for DynamoDB table
+     */
+    @Test
+    public void testLambdaFunctionHasEnvironmentVariables() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify Lambda has environment variables configured
+        template.hasResourceProperties("AWS::Lambda::Function", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("Environment", Match.objectLike(
+                    new HashMap<String, Object>() {{
+                        put("Variables", Match.objectLike(
+                            new HashMap<String, Object>() {{
+                                put("TABLE_NAME", Match.anyValue());
+                            }}
+                        ));
+                    }}
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: Lambda execution role should have DynamoDB permissions
+     */
+    @Test
+    public void testLambdaHasDynamoDBPermissions() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify Lambda role has DynamoDB permissions
+        template.hasResourceProperties("AWS::IAM::Policy", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("PolicyDocument", Match.objectLike(
+                    new HashMap<String, Object>() {{
+                        put("Statement", Match.arrayWith(List.of(
+                            Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    put("Action", Match.arrayWith(List.of(
+                                        "dynamodb:GetItem",
+                                        "dynamodb:PutItem",
+                                        "dynamodb:UpdateItem"
+                                    )));
+                                }}
+                            )
+                        )));
+                    }}
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: State machine should include Lambda invocation task
+     */
+    @Test
+    public void testStateMachineIncludesLambdaInvocationTask() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify state machine definition includes Lambda invocation
+        template.hasResourceProperties("AWS::StepFunctions::StateMachine", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("DefinitionString", Match.serializedJson(
+                    Match.objectLike(
+                        new HashMap<String, Object>() {{
+                            put("States", Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    put("ProcessAudio", Match.objectLike(
+                                        new HashMap<String, Object>() {{
+                                            put("Type", "Task");
+                                            put("Resource", Match.stringLikeRegexp(".*lambda:invoke.*"));
+                                        }}
+                                    ));
+                                }}
+                            ));
+                        }}
+                    )
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: State machine should have permission to invoke Lambda
+     */
+    @Test
+    public void testStateMachineCanInvokeLambda() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify state machine role has Lambda invoke permissions
+        template.hasResourceProperties("AWS::IAM::Policy", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("PolicyDocument", Match.objectLike(
+                    new HashMap<String, Object>() {{
+                        put("Statement", Match.arrayWith(List.of(
+                            Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    put("Action", "lambda:InvokeFunction");
+                                }}
+                            )
+                        )));
+                    }}
+                ));
+            }}
+        ));
+    }
     }
 }
