@@ -63,17 +63,16 @@ public class SleepAudioProcessor implements RequestHandler<Map<String, Object>, 
             String audioId = (String) input.get("audioId");
             String eventTime = (String) input.get("eventTime");
 
-            // Basic validation
-            // Validate required fields
+            if (bucket == null || bucket.isEmpty()) {
                 throw new IllegalArgumentException("Bucket name is required");
                 String error = "Bucket name is required";
                 logger.log("ERROR: " + error);
+            }
                 throw new IllegalArgumentException(error);
-            if (key == null || key.isEmpty()) {
                 throw new IllegalArgumentException("Object key is required");
                 String error = "Object key is required";
                 logger.log("ERROR: " + error);
-                throw new IllegalArgumentException(error);
+            }
 
             
             // Validate file extension

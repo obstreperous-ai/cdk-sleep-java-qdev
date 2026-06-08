@@ -54,6 +54,34 @@ graph TB
 
 ## Architecture Flow
 
+## Deployment Architecture (NEW in Issue #9)
+
+```mermaid
+graph LR
+    Developer[Developer] -->|Push Code| CodeRepo[Code Repository]
+    CodeRepo -->|Trigger| Pipeline[CDK Pipeline]
+    Pipeline -->|Synth & Test| Build[Build & Test]
+    Build -->|Deploy| DevEnv[Dev Environment<br/>Auto-deploy]
+    DevEnv -->|Tests Pass| StageEnv[Stage Environment<br/>Auto-deploy]
+    StageEnv -->|Manual Approval| ProdEnv[Prod Environment<br/>Retain Policy]
+    
+    DevEnv -.->|DESTROY Policy| DevResources[Dev Resources<br/>Auto-cleanup]
+    StageEnv -.->|RETAIN Policy| StageResources[Stage Resources<br/>Protected]
+    ProdEnv -.->|RETAIN Policy| ProdResources[Prod Resources<br/>Protected]
+    
+    style Pipeline fill:#2196F3,stroke:#0D47A1,color:#fff
+    style DevEnv fill:#4CAF50,stroke:#2E7D32,color:#fff
+    style StageEnv fill:#FFC107,stroke:#F57F17,color:#000
+    style ProdEnv fill:#F44336,stroke:#B71C1C,color:#fff
+```
+
+### Multi-Environment Strategy
+- **Dev**: Rapid development, auto-cleanup (DESTROY policy)
+- **Stage**: Pre-production testing, data retention (RETAIN policy)
+- **Prod**: Production workloads, full data protection (RETAIN policy)
+
+CDK Pipelines skeleton created for future automated deployment across environments.
+
 ### Complete End-to-End Pipeline with Input Validation
 ### 1. File Upload (Entry Point)
 - User uploads audio file to **S3 Input Bucket**
@@ -400,17 +428,19 @@ The state machine orchestrates a complete pipeline with input validation and err
 1. **Complete Lambda Processing Logic** (Issue #8)
    - ✅ Input validation with file extension checking
    - ✅ Complete pipeline wiring
-   - Audio metadata extraction (future)
-   - Deep content validation (future)
+   - Audio metadata extraction (planned)
+   - Deep content validation (planned)
 
 2. **Input Validation** (Issue #8)
    - ✅ File format validation (extension-based)
    - Size limits
    - Content type verification
-
-3. **End-to-End Testing** (Issue #8)
-   - Integration tests
-   - Pipeline smoke tests
+3. **Deployment & Testing** (Issue #9)
+   - ✅ Multi-environment support (dev, stage, prod)
+   - ✅ CDK Pipelines skeleton
+   - ✅ Environment-based resource policies
+   - ✅ Comprehensive pipeline testing
+   - CI/CD integration (in progress)
    - Performance benchmarks
 
 4. **Advanced Audio Processing**
@@ -426,10 +456,11 @@ The state machine orchestrates a complete pipeline with input validation and err
    - X-Ray tracing
 
 6. **Production Readiness**
-   - Environment-specific configurations
-   - Resource tagging
+   - ✅ Environment-specific configurations
+   - ✅ Resource tagging
    - Cost optimization
    - Backup strategies
+   - Manual approval gates for prod deployments
 
 7. **API Layer**
    - API Gateway for programmatic access
@@ -449,6 +480,7 @@ The state machine orchestrates a complete pipeline with input validation and err
 - **Event Management**: Amazon EventBridge
 - **Monitoring**: Amazon CloudWatch
 - **Security**: AWS KMS, AWS IAM
+- **CI/CD**: CDK Pipelines (skeleton)
 - **Build Tool**: Maven
 - **Testing**: JUnit 5, CDK Assertions
 
@@ -461,13 +493,17 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 - Pull request process
 
 ## Deployment
+### Local Development
 
 ```bash
 # Run tests
 mvn clean test
-
+# Synthesize CloudFormation (default: dev environment)
 # Synthesize CloudFormation
 cdk synth
+# Synthesize for specific environment
+cdk synth --context environment=prod
+
 
 # Preview changes
 cdk diff
@@ -475,9 +511,33 @@ cdk diff
 # Deploy to AWS
 cdk deploy
 ```
+### Multi-Environment Deployment
+
+**Development Environment** (default):
+- Removal policy: DESTROY (easy cleanup)
+- Auto-delete objects enabled
+- Rapid iteration and testing
+
+**Production Environment**:
+- Removal policy: RETAIN (data protection)
+- Auto-delete objects disabled
+- Manual deployment recommended
+
+```bash
+# Deploy to production (use with caution)
+cdk deploy --context environment=prod
+```
+
+### CDK Pipelines (Future)
+The `SleepAudioPipelineStack` provides a skeleton for automated CI/CD deployment across multiple environments. Future enhancements will include:
+- Source integration (GitHub/CodeCommit)
+- Automated testing stages
+- Manual approval gates
+- Progressive deployment (dev → stage → prod)
+
 
 ---
-
+**Last Updated**: Issue #9 - Pipeline Testing, Refinements & Deployment Preparation  
 **Last Updated**: Issue #8 - Complete Pipeline Wiring with Input Validation  
-**Maintained By**: Q Developer Agent  
+**Version**: 0.3
 **Version**: 0.2
