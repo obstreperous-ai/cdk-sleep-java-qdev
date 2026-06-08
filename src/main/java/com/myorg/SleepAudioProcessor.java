@@ -17,6 +17,7 @@ import java.util.Map;
  * - Receives input from Step Functions (S3 event details, audioId)
  * - Logs the input for debugging and monitoring
  * - Performs basic validation
+ * - Checks file extensions for supported audio formats
  * - Returns success response with metadata
  * 
  * Future enhancements:
@@ -63,13 +64,27 @@ public class SleepAudioProcessor implements RequestHandler<Map<String, Object>, 
             String eventTime = (String) input.get("eventTime");
 
             // Basic validation
-            if (bucket == null || bucket.isEmpty()) {
+            // Validate required fields
                 throw new IllegalArgumentException("Bucket name is required");
-            }
+                String error = "Bucket name is required";
+                logger.log("ERROR: " + error);
+                throw new IllegalArgumentException(error);
             if (key == null || key.isEmpty()) {
                 throw new IllegalArgumentException("Object key is required");
-            }
+                String error = "Object key is required";
+                logger.log("ERROR: " + error);
+                throw new IllegalArgumentException(error);
 
+            
+            // Validate file extension
+            boolean validExt = key.endsWith(".mp3") || key.endsWith(".wav") || key.endsWith(".m4a") || key.endsWith(".flac") || key.endsWith(".ogg");
+            if (!validExt) {
+                String error = "Unsupported file type. Use .mp3, .wav, .m4a, .flac, or .ogg";
+                logger.log("ERROR: " + error);
+                throw new IllegalArgumentException(error);
+            }
+            
+            logger.log("Validation passed for key: " + key);
             logger.log(String.format("Processing file: s3://%s/%s (audioId: %s)", bucket, key, audioId));
 
             // Placeholder for future processing logic:

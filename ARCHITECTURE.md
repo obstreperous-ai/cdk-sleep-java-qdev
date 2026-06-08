@@ -12,20 +12,29 @@ graph TB
     InputBucket -->|2. Object Created Event| EventBridge[EventBridge Rule]
     EventBridge -->|3. Trigger| StateMachine[Step Functions<br/>State Machine]
     
-    StateMachine -->|4a. Write Initial Metadata| DynamoDB[(DynamoDB Table<br/>audioId PK)]
-    StateMachine -->|4b. Invoke| Lambda[Lambda Function<br/>SleepAudioProcessor<br/>Java 17]
+    StateMachine -->|4. Validate Input| Validation{ValidateInput<br/>CheckFileExtension}
+    Validation -->|Invalid Format| ValidationError[ValidationFailed<br/>Pass State]
+    ValidationError -->|Update Status| DynamoFailed[UpdateStatusFailed]
+    DynamoFailed -->|Notify| FailureSNS[SNS Topic<br/>Pipeline Failed<br/>KMS Encrypted]
+    
+    Validation -->|Valid Format| PutMetadata[WriteInitialMetadata<br/>DynamoDB]
+    PutMetadata -->|5a. Record Created| DynamoDB[(DynamoDB Table<br/>audioId PK)]
+    PutMetadata -->|5b. Invoke| Lambda[Lambda Function<br/>SleepAudioProcessor<br/>Java 17]
     Lambda -->|Read/Write| DynamoDB
     Lambda -->|Read| InputBucket
     Lambda -->|Write| OutputBucket[S3 Output Bucket<br/>Versioned, Encrypted]
     
-    StateMachine -->|5. Synthesize Speech| Polly[Amazon Polly<br/>Text-to-Speech]
-    Polly -->|Audio Stream| StateMachine
+    Lambda -->|6. Process Complete| Polly[Amazon Polly<br/>Text-to-Speech]
+    Polly -->|7. Audio Stream| UpdateComplete[UpdateStatusCompleted<br/>DynamoDB]
     
-    StateMachine -->|6. Update Status| DynamoDB
-    StateMachine -->|7a. Success| SuccessSNS[SNS Topic<br/>Pipeline Completed<br/>KMS Encrypted]
-    StateMachine -->|7b. Failure| FailureSNS[SNS Topic<br/>Pipeline Failed<br/>KMS Encrypted]
+    UpdateComplete -->|8. Update Status| DynamoDB
+    UpdateComplete -->|9. Success| SuccessSNS[SNS Topic<br/>Pipeline Completed<br/>KMS Encrypted]
     
-    StateMachine -->|Logs| CloudWatch[CloudWatch Logs<br/>All Execution Data]
+    Lambda -.->|Error| ErrorPath[Error Handler]
+    Polly -.->|Error| ErrorPath
+    ErrorPath -.->|Catch All| DynamoFailed
+    
+    StateMachine -.->|Logs| CloudWatch[CloudWatch Logs<br/>All Execution Data]
     Lambda -->|Logs| CloudWatch
     
     SuccessSNS -->|Notify| Subscribers[Email/SMS/Lambda<br/>Subscribers]
@@ -35,6 +44,7 @@ graph TB
     style OutputBucket fill:#4CAF50,stroke:#2E7D32,color:#fff
     style DynamoDB fill:#FF9800,stroke:#E65100,color:#fff
     style StateMachine fill:#2196F3,stroke:#0D47A1,color:#fff
+    style Validation fill:#FFC107,stroke:#F57F17,color:#000
     style Lambda fill:#FF5722,stroke:#BF360C,color:#fff
     style Polly fill:#9C27B0,stroke:#4A148C,color:#fff
     style SuccessSNS fill:#8BC34A,stroke:#33691E,color:#fff
@@ -44,6 +54,7 @@ graph TB
 
 ## Architecture Flow
 
+### Complete End-to-End Pipeline with Input Validation
 ### 1. File Upload (Entry Point)
 - User uploads audio file to **S3 Input Bucket**
 - Bucket has versioning and S3-managed encryption enabled
@@ -56,52 +67,73 @@ graph TB
 
 ### 3. Workflow Orchestration (Step Functions)
 The state machine orchestrates the following steps:
+The state machine orchestrates a complete pipeline with input validation and error handling:
 
+#### Step 3.0: Input Validation (NEW in Issue #8)
+- **ValidateInput** (Pass state) extracts and validates input fields
+- Validates bucket name, object key, and event time are present
+- Extracts file extension for format validation
+- **CheckFileExtension** (Choice state) validates supported formats
+  - Supported formats: `.mp3`, `.wav`, `.m4a`, `.flac`
+  - Valid files proceed to processing pipeline
+  - Invalid files route to error path
+- **ValidationFailed** (Pass state) captures validation errors
+  - Sets clear error message for unsupported formats
+  - Routes to UpdateStatusFailed → SNS failure notification → End
 #### Step 3a: Write Initial Metadata
-- **DynamoDB PutItem** task writes initial record
+#### Step 3.1: Write Initial Metadata
 - Stores: `audioId`, `status: PROCESSING`, `inputBucket`, `inputKey`, `createdAt`
 - Provides audit trail and enables status tracking
 
+- Only executed after validation passes
 #### Step 3b: Lambda Processing
-- **Lambda Invoke** task calls `SleepAudioProcessorFunction`
+#### Step 3.2: Lambda Processing with Validation
 - Lambda receives S3 event details (bucket, key, audioId, eventTime)
 - Current functionality:
-  - Logs input for debugging
+- **Input Validation** (NEW in Issue #8):
+  - Validates bucket and key are not empty
+  - Checks file extension matches supported formats (`.mp3`, `.wav`, `.m4a`, `.flac`, `.ogg`)
+  - Throws IllegalArgumentException for invalid inputs
+  - Logs all validation steps
+- Processing functionality:
   - Performs basic validation
   - Returns success response with metadata
 - Future enhancements:
   - Extract audio metadata (duration, format, bitrate)
   - Validate audio file format and quality
-  - Enrich metadata with additional information
+  - Deep file content validation (magic bytes, codec validation)
   - Update DynamoDB with enriched data
   - Perform audio transformations
 - Error handling: Catches all errors and routes to failure path
 
 #### Step 3c: Speech Synthesis
-- **Polly SynthesizeSpeech** task generates audio
+#### Step 3.3: Speech Synthesis
 - Uses neural voice (Joanna) for high-quality output
 - Currently uses placeholder text (to be replaced with dynamic content)
 - Returns audio stream metadata
 - Error handling: Catches all errors and routes to failure path
-
+#### Step 3.4: Status Update (Success Path)
 #### Step 3d: Status Update (Success Path)
 - **DynamoDB UpdateItem** updates status to `COMPLETED`
 - Adds `updatedAt` timestamp
 - Preserves processing history
-
+#### Step 3.5: Success Notification
 #### Step 3e: Success Notification
 - **SNS Publish** sends completion notification
 - Includes full execution context for downstream processing
+- Triggers PipelineSucceeded state
 - Encrypted with KMS
-
+#### Step 3.6: Status Update (Failure Path)
 #### Step 3f: Status Update (Failure Path)
 - **DynamoDB UpdateItem** updates status to `FAILED`
 - Stores error information in `errorInfo` attribute
+- Handles both validation failures and processing errors
 - Adds `updatedAt` timestamp
-
+#### Step 3.7: Failure Notification
 #### Step 3g: Failure Notification
 - **SNS Publish** sends failure alert
 - Includes error details for troubleshooting
+- Triggers PipelineFailed state
 - Encrypted with KMS
 
 ### 4. Monitoring and Observability
@@ -165,6 +197,21 @@ The state machine orchestrates the following steps:
 **Security**:
 - Encryption at rest with AWS-managed keys
 - Least-privilege IAM policies
+
+### Input Validation (NEW in Issue #8)
+**Purpose**: Ensure only valid audio files enter the pipeline
+
+**Validation Layers**:
+1. **State Machine Level** (CheckFileExtension Choice state):
+   - Pattern matching for file extensions
+   - Supported formats: `.mp3`, `.wav`, `.m4a`, `.flac`
+   - Routes invalid files to error path before processing
+
+2. **Lambda Level** (SleepAudioProcessor):
+   - Required field validation (bucket, key)
+   - File extension validation (`.mp3`, `.wav`, `.m4a`, `.flac`, `.ogg`)
+   - Detailed error logging
+   - Throws exceptions for Step Functions error handling
 - Point-in-time recovery for data protection
 
 ### Lambda Function (SleepAudioProcessor)
@@ -176,10 +223,15 @@ The state machine orchestrates the following steps:
 - Environment Variables:
   - `TABLE_NAME`: DynamoDB table name
 
-**Current Functionality**:
+**Current Functionality** (Enhanced in Issue #8):
 - Receives input from Step Functions (S3 event details, audioId)
 - Logs input for debugging and monitoring
-- Performs basic validation (bucket and key presence)
+- **Input Validation**:
+  - Validates required fields (bucket, key)
+  - Validates file extension against supported formats
+  - Logs validation steps
+  - Throws exceptions for invalid inputs
+- Performs metadata processing
 - Returns success response with metadata
 
 **Future Enhancements** (Placeholder for):
@@ -228,9 +280,12 @@ The state machine orchestrates the following steps:
 
 **Type**: STANDARD (for long-running workflows and auditing)
 
-**States**:
-1. **WriteInitialMetadata** (DynamoDB PutItem)
-2. **ProcessAudio** (Lambda Invoke) - NEW in Issue #7
+0. **ValidateInput** (Pass) - NEW in Issue #8
+0.5. **CheckFileExtension** (Choice) - NEW in Issue #8
+0.6. **ValidationFailed** (Pass) - NEW in Issue #8
+1. **WriteInitialMetadata** (DynamoDB PutItem) - Issue #5
+2. **ProcessAudio** (Lambda Invoke) - Issue #7
+3. **PollyTextToSpeech** (CallAwsService) - Issue #4
 3. **PollyTextToSpeech** (CallAwsService)
 4. **UpdateStatusCompleted** (DynamoDB UpdateItem)
 5. **PublishSuccessNotification** (SNS Publish)
@@ -238,7 +293,12 @@ The state machine orchestrates the following steps:
 7. **PublishFailureNotification** (SNS Publish)
 8. **PipelineSucceeded** (Succeed)
 9. **PipelineFailed** (Fail)
-
+**Error Handling** (Enhanced in Issue #8):
+- **Validation Errors**:
+  - CheckFileExtension routes unsupported formats to error path
+  - ValidationFailed state captures error details
+  - No processing occurs for invalid files
+- **Processing Errors**:
 **Error Handling**:
 - Lambda task has Catch block for all errors (`States.ALL`)
 - Polly task has Catch block for all errors (`States.ALL`)
@@ -338,13 +398,13 @@ The state machine orchestrates the following steps:
 
 ### Planned Features
 1. **Complete Lambda Processing Logic** (Issue #8)
-   - Audio metadata extraction
-   - Format validation
-   - Quality checks
-   - Audio transformations
+   - ✅ Input validation with file extension checking
+   - ✅ Complete pipeline wiring
+   - Audio metadata extraction (future)
+   - Deep content validation (future)
 
 2. **Input Validation** (Issue #8)
-   - File format validation
+   - ✅ File format validation (extension-based)
    - Size limits
    - Content type verification
 
@@ -418,6 +478,6 @@ cdk deploy
 
 ---
 
-**Last Updated**: Issue #7 - Lambda Function Skeleton + Step Functions Integration  
+**Last Updated**: Issue #8 - Complete Pipeline Wiring with Input Validation  
 **Maintained By**: Q Developer Agent  
-**Version**: 0.1
+**Version**: 0.2
