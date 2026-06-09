@@ -9,9 +9,23 @@ import java.util.Arrays;
 public class CdkBaseApp {
     public static void main(final String[] args) {
         App app = new App();
+        
+        // Get environment from context (default to "dev")
+        String environment = (String) app.getNode().tryGetContext("environment");
+        if (environment == null) {
+            environment = "dev";
+        }
+        
+        // Determine stack name based on environment
+        String stackName = "CdkBaseStack";
+        if (!environment.equals("dev")) {
+            stackName = "CdkBaseStack-" + environment;
+        }
 
-        new CdkBaseStack(app, "CdkBaseStack", StackProps.builder()
-                // If you don't specify 'env', this stack will be environment-agnostic.
+        new CdkBaseStack(app, stackName, StackProps.builder()
+                // Environment-agnostic by default for portability
+                // For specific account/region deployment, set CDK_DEFAULT_ACCOUNT and CDK_DEFAULT_REGION
+                // or use cdk.json context
                 // Account/Region-dependent features and context lookups will not work,
                 // but a single synthesized template can be deployed anywhere.
 
@@ -34,7 +48,8 @@ public class CdkBaseApp {
                 */
 
                 // For more information, see https://docs.aws.amazon.com/cdk/latest/guide/environments.html
-                .build());
+                .build(), 
+                environment);
 
         app.synth();
     }

@@ -13,6 +13,15 @@
     ]
   },
   "context": {
+    "environment": "dev",
+    "environments": {
+      "dev": {
+        "removalPolicy": "DESTROY"
+      },
+      "prod": {
+        "removalPolicy": "RETAIN"
+      }
+    },
     "@aws-cdk-containers/ecs-service-extensions:enableDefaultLogDriver": true,
     "@aws-cdk/aws-apigateway:authorizerChangeDeploymentLogicalId": true,
     "@aws-cdk/aws-apigateway:disableCloudWatchRole": true,

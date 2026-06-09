@@ -893,5 +893,85 @@ public class CdkBaseTest {
             }}
         ));
     }
+
+    // ======================================================================
+    // Issue #9: Additional Pipeline Testing & Environment Support (TDD)
+    // ======================================================================
+
+    /**
+     * Test: Default stack creation without environment should work
+     */
+    @Test
+    public void testDefaultStackCreationWithoutEnvironment() {
+        App app = new App();
+        
+        // Should work with default constructor
+        assertDoesNotThrow(() -> {
+            CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+            Template.fromStack(stack);
+        });
+    }
+
+    /**
+     * Test: Stack should support environment parameter
+     */
+    @Test
+    public void testStackSupportsEnvironmentParameter() {
+        App app = new App();
+        
+        // Should work with environment parameter
+        assertDoesNotThrow(() -> {
+            CdkBaseStack stack = new CdkBaseStack(app, "TestStack", StackProps.builder().build(), "dev");
+            Template.fromStack(stack);
+        });
+    }
+
+    /**
+     * Test: Lambda function should have error handling in state machine
+     */
+    @Test
+    public void testLambdaHasErrorHandlingInStateMachine() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // ProcessAudio task should have Catch block
+        template.hasResourceProperties("AWS::StepFunctions::StateMachine", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("DefinitionString", Match.serializedJson(
+                    Match.objectLike(
+                        new HashMap<String, Object>() {{
+                            put("States", Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    put("ProcessAudio", Match.objectLike(
+                                        new HashMap<String, Object>() {{
+                                            put("Catch", Match.anyValue());
+                                        }}
+                                    ));
+                                }}
+                            ));
+                        }}
+                    )
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: Complete resource count for full pipeline
+     */
+    @Test
+    public void testCompleteResourceCount() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Verify minimum expected resource counts
+        assertTrue(template.toJSON().toString().contains("AWS::S3::Bucket"));
+        assertTrue(template.toJSON().toString().contains("AWS::StepFunctions::StateMachine"));
+        assertTrue(template.toJSON().toString().contains("AWS::Lambda::Function"));
+        assertTrue(template.toJSON().toString().contains("AWS::DynamoDB::Table"));
+        assertTrue(template.toJSON().toString().contains("AWS::SNS::Topic"));
+        assertTrue(template.toJSON().toString().contains("AWS::Events::Rule"));
     }
 }

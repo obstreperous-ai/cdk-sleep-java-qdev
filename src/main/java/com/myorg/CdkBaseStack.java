@@ -5,6 +5,7 @@ import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
 import software.amazon.awscdk.RemovalPolicy;
 import software.amazon.awscdk.services.s3.Bucket;
+import software.amazon.awscdk.Tags;
 import software.amazon.awscdk.services.s3.BucketEncryption;
 import software.amazon.awscdk.services.s3.EventBridgeConfiguration;
 import software.amazon.awscdk.services.kms.Key;
@@ -59,11 +60,37 @@ public class CdkBaseStack extends Stack {
     private final Topic failedTopic;
     private final Function audioProcessorLambda;
     
+    private final String environment;
+    
     public CdkBaseStack(final Construct scope, final String id) {
-        this(scope, id, null);
+        this(scope, id, null, "dev");
     }
 
     public CdkBaseStack(final Construct scope, final String id, final StackProps props) {
+        this(scope, id, props, "dev");
+    }
+
+    public CdkBaseStack(final Construct scope, final String id, final StackProps props, final String environment) {
+        super(scope, id, props);
+        
+        this.environment = environment != null ? environment : "dev";
+        
+        // Determine removal policy based on environment
+        RemovalPolicy removalPolicy = getRemovalPolicyForEnvironment(this.environment);
+        boolean autoDeleteObjects = "dev".equals(this.environment);
+        
+        // Add environment tags to the stack
+        Tags.of(this).add("Environment", this.environment);
+        Tags.of(this).add("ManagedBy", "CDK");
+        Tags.of(this).add("Project", "SleepAudioPipeline");
+        
+        initializeResources(removalPolicy, autoDeleteObjects);
+    }
+    
+    private void initializeResources(RemovalPolicy removalPolicy, boolean autoDeleteObjects) {
+        // Note: 'this' in the following code refers to the CdkBaseStack instance
+        // All resources are created in the context of this stack
+        
         super(scope, id, props);
 
         // Input S3 Bucket - receives raw audio files
@@ -72,8 +99,8 @@ public class CdkBaseStack extends Stack {
                 .versioned(true)
                 .eventBridgeEnabled(true)
                 .blockPublicAccess(BlockPublicAccess.BLOCK_ALL)
-                .removalPolicy(RemovalPolicy.DESTROY) // For dev - should be configurable
-                .autoDeleteObjects(true) // For dev - cleanup on stack deletion
+                .removalPolicy(removalPolicy)
+                .autoDeleteObjects(autoDeleteObjects)
                 .build();
 
         // Output S3 Bucket - stores processed audio files
@@ -81,8 +108,8 @@ public class CdkBaseStack extends Stack {
                 .encryption(BucketEncryption.S3_MANAGED)
                 .versioned(true)
                 .blockPublicAccess(BlockPublicAccess.BLOCK_ALL)
-                .removalPolicy(RemovalPolicy.DESTROY) // For dev - should be configurable
-                .autoDeleteObjects(true) // For dev - cleanup on stack deletion
+                .removalPolicy(removalPolicy)
+                .autoDeleteObjects(autoDeleteObjects)
                 .build();
 
         // DynamoDB Table - stores audio pipeline metadata
@@ -94,7 +121,7 @@ public class CdkBaseStack extends Stack {
                 .billingMode(BillingMode.PAY_PER_REQUEST)
                 .encryption(TableEncryption.AWS_MANAGED)
                 .pointInTimeRecovery(true)
-                .removalPolicy(RemovalPolicy.DESTROY) // For dev - should be configurable
+                .removalPolicy(removalPolicy)
                 .build();
 
         // KMS Key for SNS encryption
@@ -122,11 +149,12 @@ public class CdkBaseStack extends Stack {
                 .handler("com.myorg.SleepAudioProcessor::handleRequest")
                 .code(Code.fromAsset("target/function.jar"))
                 .environment(Map.of(
-                    "TABLE_NAME", metadataTable.getTableName()
+                    "TABLE_NAME", metadataTable.getTableName(),
+                    "ENVIRONMENT", this.environment
                 ))
                 .description("Processes sleep audio files - placeholder for metadata enrichment and validation")
                 .build();
-
+        
         // Grant Lambda permissions to access DynamoDB table
         metadataTable.grantReadWriteData(audioProcessorLambda);
 
@@ -397,5 +425,21 @@ public class CdkBaseStack extends Stack {
     // Getters for testing if needed
     public StateMachine getStateMachine() {
         return stateMachine;
+    }
+    
+    public String getEnvironment() {
+        return environment;
+    }
+    
+    /**
+     * Determine removal policy based on environment
+     * - dev: DESTROY (easy cleanup)
+     * - stage/prod: RETAIN (data protection)
+     */
+    private RemovalPolicy getRemovalPolicyForEnvironment(String env) {
+        if ("dev".equals(env)) {
+            return RemovalPolicy.DESTROY;
+        }
+        return RemovalPolicy.RETAIN;
     }
 }
