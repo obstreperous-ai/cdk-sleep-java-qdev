@@ -162,6 +162,7 @@ public class CdkBaseStack extends Stack {
                 .environment(Map.of(
                     "TABLE_NAME", metadataTable.getTableName(),
                     "ENVIRONMENT", this.environment
+                    "OUTPUT_BUCKET", outputBucket.getBucketName(),
                 ))
                 .description("Processes sleep audio files - placeholder for metadata enrichment and validation")
                 .tracing(Tracing.ACTIVE)
@@ -177,6 +178,13 @@ public class CdkBaseStack extends Stack {
         // Grant Lambda write access to output bucket
         outputBucket.grantWrite(audioProcessorLambda);
 
+        
+        // Grant Lambda permission to use Amazon Polly for text-to-speech (Issue #11)
+        audioProcessorLambda.addToRolePolicy(PolicyStatement.Builder.create()
+                .effect(Effect.ALLOW)
+                .actions(List.of("polly:SynthesizeSpeech"))
+                .resources(List.of("*"))
+                .build());
         // CloudWatch Log Group for EventBridge rule (placeholder target)
         // CloudWatch Log Group for Step Functions state machine
         LogGroup stateMachineLogGroup = LogGroup.Builder.create(this, "SleepAudioStateMachineLogGroup")
