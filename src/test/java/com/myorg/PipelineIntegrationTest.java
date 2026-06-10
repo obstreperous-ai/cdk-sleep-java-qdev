@@ -246,4 +246,207 @@ public class PipelineIntegrationTest {
             }}
         ));
     }
+
+    /**
+     * TDD Tests for Issue #10: Advanced Error Handling, Retry Policies, and Observability
+     * These tests are written FIRST (before implementation) following strict TDD.
+     */
+
+    /**
+     * Test: Lambda task should have retry policy configured
+     */
+    @Test
+    public void testLambdaTaskHasRetryPolicy() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // ProcessAudio Lambda task should have Retry configuration
+        template.hasResourceProperties("AWS::StepFunctions::StateMachine", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("DefinitionString", Match.serializedJson(
+                    Match.objectLike(
+                        new HashMap<String, Object>() {{
+                            put("States", Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    put("ProcessAudio", Match.objectLike(
+                                        new HashMap<String, Object>() {{
+                                            put("Type", "Task");
+                                            put("Retry", Match.arrayWith(List.of(
+                                                Match.objectLike(new HashMap<String, Object>() {{
+                                                    put("ErrorEquals", Match.arrayWith(List.of("Lambda.ServiceException", "Lambda.TooManyRequestsException")));
+                                                    put("IntervalSeconds", Match.anyValue());
+                                                    put("MaxAttempts", Match.anyValue());
+                                                    put("BackoffRate", Match.anyValue());
+                                                }})
+                                            )));
+                                        }}
+                                    ));
+                                }}
+                            ));
+                        }}
+                    )
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: Polly task should have retry policy configured
+     */
+    @Test
+    public void testPollyTaskHasRetryPolicy() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Polly task should have Retry configuration
+        template.hasResourceProperties("AWS::StepFunctions::StateMachine", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("DefinitionString", Match.serializedJson(
+                    Match.objectLike(
+                        new HashMap<String, Object>() {{
+                            put("States", Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    put("PollyTextToSpeech", Match.objectLike(
+                                        new HashMap<String, Object>() {{
+                                            put("Type", "Task");
+                                            put("Retry", Match.arrayWith(List.of(
+                                                Match.objectLike(new HashMap<String, Object>() {{
+                                                    put("ErrorEquals", Match.arrayWith(List.of("Polly.ServiceFailureException")));
+                                                    put("IntervalSeconds", Match.anyValue());
+                                                    put("MaxAttempts", Match.anyValue());
+                                                    put("BackoffRate", Match.anyValue());
+                                                }})
+                                            )));
+                                        }}
+                                    ));
+                                }}
+                            ));
+                        }}
+                    )
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: DynamoDB tasks should have retry policy configured
+     */
+    @Test
+    public void testDynamoDBTasksHaveRetryPolicy() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // WriteInitialMetadata should have Retry configuration
+        template.hasResourceProperties("AWS::StepFunctions::StateMachine", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("DefinitionString", Match.serializedJson(
+                    Match.objectLike(
+                        new HashMap<String, Object>() {{
+                            put("States", Match.objectLike(
+                                new HashMap<String, Object>() {{
+                                    put("WriteInitialMetadata", Match.objectLike(
+                                        new HashMap<String, Object>() {{
+                                            put("Type", "Task");
+                                            put("Retry", Match.arrayWith(List.of(
+                                                Match.objectLike(new HashMap<String, Object>() {{
+                                                    put("ErrorEquals", Match.arrayWith(List.of("DynamoDB.ProvisionedThroughputExceededException")));
+                                                }})
+                                            )));
+                                        }}
+                                    ));
+                                }}
+                            ));
+                        }}
+                    )
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: X-Ray tracing should be enabled on Lambda function
+     */
+    @Test
+    public void testXRayTracingEnabledOnLambda() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Lambda function should have X-Ray tracing enabled
+        template.hasResourceProperties("AWS::Lambda::Function", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("TracingConfig", Match.objectLike(
+                    new HashMap<String, Object>() {{
+                        put("Mode", "Active");
+                    }}
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: X-Ray tracing should be enabled on State Machine
+     */
+    @Test
+    public void testXRayTracingEnabledOnStateMachine() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // State machine should have X-Ray tracing enabled
+        template.hasResourceProperties("AWS::StepFunctions::StateMachine", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("TracingConfiguration", Match.objectLike(
+                    new HashMap<String, Object>() {{
+                        put("Enabled", true);
+                    }}
+                ));
+            }}
+        ));
+    }
+
+    /**
+     * Test: CloudWatch Alarm for State Machine failures should exist
+     */
+    @Test
+    public void testCloudWatchAlarmForStateMachineFailures() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Should have alarm for ExecutionsFailed metric
+        template.hasResourceProperties("AWS::CloudWatch::Alarm", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("MetricName", "ExecutionsFailed");
+                put("Namespace", "AWS/States");
+                put("Statistic", "Sum");
+                put("ComparisonOperator", "GreaterThanThreshold");
+                put("Threshold", 0);
+            }}
+        ));
+    }
+
+    /**
+     * Test: CloudWatch Alarm for Lambda errors should exist
+     */
+    @Test
+    public void testCloudWatchAlarmForLambdaErrors() {
+        App app = new App();
+        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
+        Template template = Template.fromStack(stack);
+
+        // Should have alarm for Lambda Errors metric
+        template.hasResourceProperties("AWS::CloudWatch::Alarm", Match.objectLike(
+            new HashMap<String, Object>() {{
+                put("MetricName", "Errors");
+                put("Namespace", "AWS/Lambda");
+                put("Statistic", "Sum");
+                put("ComparisonOperator", "GreaterThanThreshold");
+                put("Threshold", 5);
+            }}
+        ));
+    }
 }

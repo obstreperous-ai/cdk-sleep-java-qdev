@@ -9,6 +9,7 @@
 ```mermaid
 graph TB
     User[User/Client] -->|1. Upload Audio| InputBucket[S3 Input Bucket<br/>Versioned, Encrypted]
+    EventBridge -->|3. Trigger| StateMachine[Step Functions<br/>State Machine<br/>X-Ray Tracing Enabled]
     InputBucket -->|2. Object Created Event| EventBridge[EventBridge Rule]
     EventBridge -->|3. Trigger| StateMachine[Step Functions<br/>State Machine]
     
@@ -19,6 +20,7 @@ graph TB
     
     Validation -->|Valid Format| PutMetadata[WriteInitialMetadata<br/>DynamoDB]
     PutMetadata -->|5a. Record Created| DynamoDB[(DynamoDB Table<br/>audioId PK)]
+    PutMetadata -->|5b. Invoke| Lambda[Lambda Function<br/>SleepAudioProcessor<br/>Java 17<br/>X-Ray Tracing<br/>Structured Logging]
     PutMetadata -->|5b. Invoke| Lambda[Lambda Function<br/>SleepAudioProcessor<br/>Java 17]
     Lambda -->|Read/Write| DynamoDB
     Lambda -->|Read| InputBucket
@@ -30,9 +32,15 @@ graph TB
     UpdateComplete -->|8. Update Status| DynamoDB
     UpdateComplete -->|9. Success| SuccessSNS[SNS Topic<br/>Pipeline Completed<br/>KMS Encrypted]
     
-    Lambda -.->|Error| ErrorPath[Error Handler]
-    Polly -.->|Error| ErrorPath
-    ErrorPath -.->|Catch All| DynamoFailed
+    Lambda -.->|Lambda.ServiceException<br/>Retry 3x + Exp Backoff| Lambda
+    Lambda -.->|Error + Catch| ErrorPath[Error Handler]
+    Polly -.->|Polly.ServiceFailureException<br/>Retry 2x + Exp Backoff| Polly
+    Polly -.->|Error + Catch| ErrorPath
+    PutMetadata -.->|DynamoDB Throttle<br/>Retry 3x| PutMetadata
+    ErrorPath -.->|Route by Error Type| DynamoFailed
+    
+    StateMachine -.->|Failures| Alarm1[CloudWatch Alarm<br/>Execution Failures]
+    Lambda -.->|Errors > 5| Alarm2[CloudWatch Alarm<br/>Lambda Errors]
     
     StateMachine -.->|Logs| CloudWatch[CloudWatch Logs<br/>All Execution Data]
     Lambda -->|Logs| CloudWatch
@@ -49,6 +57,8 @@ graph TB
     style Polly fill:#9C27B0,stroke:#4A148C,color:#fff
     style SuccessSNS fill:#8BC34A,stroke:#33691E,color:#fff
     style FailureSNS fill:#F44336,stroke:#B71C1C,color:#fff
+    style Alarm1 fill:#FF5722,stroke:#BF360C,color:#fff
+    style Alarm2 fill:#FF5722,stroke:#BF360C,color:#fff
     style EventBridge fill:#FFC107,stroke:#F57F17,color:#000
 ```
 
@@ -161,11 +171,70 @@ The state machine orchestrates a complete pipeline with input validation and err
 #### Step 3g: Failure Notification
 - **SNS Publish** sends failure alert
 - Includes error details for troubleshooting
+
+## Error Handling Strategy (NEW in Issue #10)
+
+### Retry Policies with Exponential Backoff
+
+The pipeline implements intelligent retry policies for transient failures:
+
+**Lambda Function (ProcessAudio)**:
+- Errors: `Lambda.ServiceException`, `Lambda.TooManyRequestsException`
+- Initial interval: 2 seconds
+- Max attempts: 3
+- Backoff rate: 2.0 (exponential)
+- Total retry time: ~14 seconds maximum
+
+**Amazon Polly (Text-to-Speech)**:
+- Errors: `Polly.ServiceFailureException`, `Polly.ThrottlingException`
+- Initial interval: 3 seconds
+- Max attempts: 2
+- Backoff rate: 2.0 (exponential)
+- Total retry time: ~9 seconds maximum
+
+**DynamoDB Operations** (PutItem, UpdateItem):
+- Errors: `DynamoDB.ProvisionedThroughputExceededException`
+- Initial interval: 2 seconds
+- Max attempts: 3
+- Backoff rate: 2.0 (exponential)
+- Total retry time: ~14 seconds maximum
+
+### Error Type Routing
+
+The state machine catches and handles specific error types:
+
+1. **Lambda-specific errors**:
+   - `Lambda.ServiceException` - AWS Lambda service errors
+   - `Lambda.AWSLambdaException` - Lambda runtime errors
+   - `Lambda.SdkClientException` - SDK client errors
+   - Fallback: All other errors caught by `States.ALL`
+
+2. **Polly-specific errors**:
+   - `Polly.ServiceFailureException` - Polly service failures
+   - `Polly.InvalidSsmlException` - Invalid SSML syntax
+   - `Polly.ThrottlingException` - Rate limit exceeded
+   - Fallback: All other errors caught by `States.ALL`
+
+3. **Error Context Preservation**:
+   - All errors capture context in `$.errorMessage`
+   - Error information stored in DynamoDB `errorInfo` attribute
+   - Full execution context published to SNS failure topic
+
+### Error Flow
+1. Task fails after exhausting retries
+2. Catch block routes to `UpdateStatusFailed`
+3. DynamoDB updated with error details
+4. SNS failure notification sent with full context
+5. State machine ends in `PipelineFailed` state
 - Triggers PipelineFailed state
 - Encrypted with KMS
+### 4. Monitoring and Observability (Enhanced in Issue #10)
 
 ### 4. Monitoring and Observability
 - **CloudWatch Logs** capture all execution data
+- **X-Ray Tracing** enabled on Lambda and State Machine for distributed tracing
+- **Structured JSON Logging** in Lambda for better log analysis
+- **CloudWatch Alarms** alert on critical failures
 - Step Functions logs all state transitions and data
 - Lambda logs processing details
 - Enables debugging, monitoring, and compliance
@@ -242,6 +311,91 @@ The state machine orchestrates a complete pipeline with input validation and err
    - Throws exceptions for Step Functions error handling
 - Point-in-time recovery for data protection
 
+## Observability and Monitoring (NEW in Issue #10)
+
+### X-Ray Tracing
+
+**Lambda Function**:
+- Active tracing enabled
+- Captures request/response timing
+- Traces AWS SDK calls (DynamoDB, S3)
+- Provides end-to-end request tracking
+
+**Step Functions State Machine**:
+- Tracing enabled for all executions
+- Visualizes workflow execution paths
+- Tracks timing for each state
+- Identifies bottlenecks and latency issues
+
+### Structured Logging
+
+**Lambda Function Logging Format** (JSON):
+```json
+{
+  "level": "INFO|ERROR",
+  "message": "Processing started|completed|failed",
+  "requestId": "aws-request-id",
+  "bucket": "bucket-name",
+  "key": "object-key",
+  "audioId": "audio-id",
+  "status": "SUCCESS|FAILED",
+  "durationMs": 1234,
+  "timestamp": 1234567890,
+  "error": "error message (if failed)",
+  "errorType": "exception type (if failed)"
+}
+```
+
+**Benefits**:
+- Easy parsing and analysis with CloudWatch Insights
+- Consistent log format across all requests
+- Request correlation via requestId
+- Performance metrics (durationMs)
+- Error categorization
+
+### CloudWatch Alarms
+
+**1. State Machine Execution Failures Alarm**:
+- Metric: `AWS/States` → `ExecutionsFailed`
+- Threshold: > 0 failures
+- Period: 5 minutes
+- Action: Alert when any execution fails
+- Naming: `SleepAudio-StateMachine-Failures-{environment}`
+
+**2. Lambda Function Errors Alarm**:
+- Metric: `AWS/Lambda` → `Errors`
+- Threshold: > 5 errors
+- Period: 5 minutes
+- Action: Alert when error rate is high
+- Naming: `SleepAudio-Lambda-Errors-{environment}`
+
+**Alarm Configuration**:
+- Evaluation periods: 1
+- Missing data treatment: NOT_BREACHING
+- Environment-specific naming for multi-environment support
+
+### CloudWatch Logs Insights Queries
+
+**Example queries for structured logs**:
+
+```
+# Find all errors in last hour
+fields @timestamp, message, error, errorType, requestId
+| filter level = "ERROR"
+| sort @timestamp desc
+
+# Calculate average processing duration
+fields durationMs
+| filter level = "INFO" and message = "Processing completed successfully"
+| stats avg(durationMs) as avgDuration, max(durationMs) as maxDuration, min(durationMs) as minDuration
+
+# Track processing by audio file
+fields @timestamp, audioId, status, durationMs
+| filter message = "Processing completed successfully"
+| sort @timestamp desc
+```
+
+
 ### Lambda Function (SleepAudioProcessor)
 **Purpose**: Process and enrich audio file metadata
 
@@ -251,6 +405,10 @@ The state machine orchestrates a complete pipeline with input validation and err
 - Environment Variables:
   - `TABLE_NAME`: DynamoDB table name
 
+  - `ENVIRONMENT`: Current environment (dev/stage/prod)
+- **X-Ray Tracing**: Active (Issue #10)
+- **Structured Logging**: JSON format (Issue #10)
+- Timeout: 30 seconds
 **Current Functionality** (Enhanced in Issue #8):
 - Receives input from Step Functions (S3 event details, audioId)
 - Logs input for debugging and monitoring
@@ -263,6 +421,12 @@ The state machine orchestrates a complete pipeline with input validation and err
 - Returns success response with metadata
 
 **Future Enhancements** (Placeholder for):
+
+**Observability** (NEW in Issue #10):
+- Structured JSON logging with request IDs
+- Request timing and performance metrics
+- Error categorization and context
+- X-Ray tracing for distributed debugging
 - Extract audio metadata (duration, format, bitrate, sample rate)
 - Validate audio file format and quality
 - Perform audio transformations (normalization, compression)
@@ -315,6 +479,11 @@ The state machine orchestrates a complete pipeline with input validation and err
 2. **ProcessAudio** (Lambda Invoke) - Issue #7
 3. **PollyTextToSpeech** (CallAwsService) - Issue #4
 3. **PollyTextToSpeech** (CallAwsService)
+
+**Retry Policies** (NEW in Issue #10):
+- Lambda, Polly, and DynamoDB tasks have retry policies
+- See "Error Handling Strategy" section for details
+
 4. **UpdateStatusCompleted** (DynamoDB UpdateItem)
 5. **PublishSuccessNotification** (SNS Publish)
 6. **UpdateStatusFailed** (DynamoDB UpdateItem)
@@ -324,6 +493,11 @@ The state machine orchestrates a complete pipeline with input validation and err
 **Error Handling** (Enhanced in Issue #8):
 - **Validation Errors**:
   - CheckFileExtension routes unsupported formats to error path
+- **Specific error type handling** (Issue #10):
+  - Lambda: Catches `Lambda.ServiceException`, `Lambda.AWSLambdaException`, etc.
+  - Polly: Catches `Polly.ServiceFailureException`, `Polly.InvalidSsmlException`, etc.
+  - Fallback catch-all for unexpected errors
+  - See "Error Handling Strategy" section for full details
   - ValidationFailed state captures error details
   - No processing occurs for invalid files
 - **Processing Errors**:
@@ -437,6 +611,13 @@ The state machine orchestrates a complete pipeline with input validation and err
    - Content type verification
 3. **Deployment & Testing** (Issue #9)
    - ✅ Multi-environment support (dev, stage, prod)
+
+3. **Advanced Error Handling & Observability** (Issue #10)
+   - ✅ Retry policies with exponential backoff
+   - ✅ Specific error type handling
+   - ✅ X-Ray tracing (Lambda + State Machine)
+   - ✅ Structured JSON logging
+   - ✅ CloudWatch Alarms for failures
    - ✅ CDK Pipelines skeleton
    - ✅ Environment-based resource policies
    - ✅ Comprehensive pipeline testing
@@ -452,10 +633,10 @@ The state machine orchestrates a complete pipeline with input validation and err
 5. **Enhanced Monitoring**
    - CloudWatch Dashboards
    - Custom metrics
-   - Alarms and alerts
-   - X-Ray tracing
-
-6. **Production Readiness**
+   - ✅ CloudWatch Alarms (Issue #10)
+   - ✅ X-Ray tracing (Issue #10)
+   - CloudWatch Dashboards (optional enhancement)
+   - Custom metrics (future)
    - ✅ Environment-specific configurations
    - ✅ Resource tagging
    - Cost optimization
@@ -536,8 +717,6 @@ The `SleepAudioPipelineStack` provides a skeleton for automated CI/CD deployment
 - Progressive deployment (dev → stage → prod)
 
 
----
-**Last Updated**: Issue #9 - Pipeline Testing, Refinements & Deployment Preparation  
-**Last Updated**: Issue #8 - Complete Pipeline Wiring with Input Validation  
-**Version**: 0.3
+**Last Updated**: Issue #10 - Advanced Error Handling, Retry Policies, and Observability  
+**Version**: 0.4
 **Version**: 0.2

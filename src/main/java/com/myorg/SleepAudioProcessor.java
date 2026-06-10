@@ -4,6 +4,8 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.LambdaLogger;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -19,6 +21,7 @@ import java.util.Map;
  * - Performs basic validation
  * - Checks file extensions for supported audio formats
  * - Returns success response with metadata
+ * - Uses structured JSON logging for improved observability (Issue #10)
  * 
  * Future enhancements:
  * - Extract audio metadata (duration, format, bitrate)
@@ -33,12 +36,14 @@ import java.util.Map;
 public class SleepAudioProcessor implements RequestHandler<Map<String, Object>, Map<String, Object>> {
 
     private final String tableName;
+    private final ObjectMapper objectMapper;
 
     /**
      * Constructor - initializes with environment variables
      */
     public SleepAudioProcessor() {
         this.tableName = System.getenv("TABLE_NAME");
+        this.objectMapper = new ObjectMapper();
     }
 
     /**
@@ -51,11 +56,17 @@ public class SleepAudioProcessor implements RequestHandler<Map<String, Object>, 
     @Override
     public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
         LambdaLogger logger = context.getLogger();
+        long startTime = System.currentTimeMillis();
+        String requestId = context.getRequestId();
         
         try {
-            // Log incoming request
-            logger.log("Processing audio file with input: " + input.toString());
-            logger.log("DynamoDB table name: " + tableName);
+            // Structured logging - request started
+            logStructured(logger, "INFO", "Processing started", Map.of(
+                "requestId", requestId,
+                "input", input,
+                "tableName", tableName,
+                "timestamp", System.currentTimeMillis()
+            ));
 
             // Extract input parameters
             String bucket = (String) input.get("bucket");
@@ -63,15 +74,30 @@ public class SleepAudioProcessor implements RequestHandler<Map<String, Object>, 
             String audioId = (String) input.get("audioId");
             String eventTime = (String) input.get("eventTime");
 
+            // Structured logging - parameters extracted
+            logStructured(logger, "INFO", "Parameters extracted", Map.of(
+                "requestId", requestId,
+                "bucket", bucket != null ? bucket : "null",
+                "key", key != null ? key : "null",
+                "audioId", audioId != null ? audioId : "null"
+            ));
+
             if (bucket == null || bucket.isEmpty()) {
+                logStructured(logger, "ERROR", "Validation failed", Map.of(
+                    "requestId", requestId,
+                    "error", "Bucket name is required",
+                    "timestamp", System.currentTimeMillis()
+                ));
                 throw new IllegalArgumentException("Bucket name is required");
-                String error = "Bucket name is required";
-                logger.log("ERROR: " + error);
             }
-                throw new IllegalArgumentException(error);
+
+            if (key == null || key.isEmpty()) {
+                logStructured(logger, "ERROR", "Validation failed", Map.of(
+                    "requestId", requestId,
+                    "error", "Object key is required",
+                    "timestamp", System.currentTimeMillis()
+                ));
                 throw new IllegalArgumentException("Object key is required");
-                String error = "Object key is required";
-                logger.log("ERROR: " + error);
             }
 
             
@@ -79,12 +105,21 @@ public class SleepAudioProcessor implements RequestHandler<Map<String, Object>, 
             boolean validExt = key.endsWith(".mp3") || key.endsWith(".wav") || key.endsWith(".m4a") || key.endsWith(".flac") || key.endsWith(".ogg");
             if (!validExt) {
                 String error = "Unsupported file type. Use .mp3, .wav, .m4a, .flac, or .ogg";
-                logger.log("ERROR: " + error);
+                logStructured(logger, "ERROR", "Validation failed", Map.of(
+                    "requestId", requestId,
+                    "error", error,
+                    "key", key,
+                    "timestamp", System.currentTimeMillis()
+                ));
                 throw new IllegalArgumentException(error);
             }
             
-            logger.log("Validation passed for key: " + key);
-            logger.log(String.format("Processing file: s3://%s/%s (audioId: %s)", bucket, key, audioId));
+            // Structured logging - validation passed
+            logStructured(logger, "INFO", "Validation passed", Map.of(
+                "requestId", requestId,
+                "s3Location", String.format("s3://%s/%s", bucket, key),
+                "audioId", audioId
+            ));
 
             // Placeholder for future processing logic:
             // - Validate audio file format
@@ -101,12 +136,47 @@ public class SleepAudioProcessor implements RequestHandler<Map<String, Object>, 
             response.put("processedAt", System.currentTimeMillis());
             response.put("message", "Audio file processed successfully");
 
-            logger.log("Processing completed successfully");
+            long duration = System.currentTimeMillis() - startTime;
+            
+            // Structured logging - success
+            logStructured(logger, "INFO", "Processing completed successfully", Map.of(
+                "requestId", requestId,
+                "status", "SUCCESS",
+                "audioId", audioId,
+                "durationMs", duration,
+                "timestamp", System.currentTimeMillis()
+            ));
+            
             return response;
 
         } catch (Exception e) {
-            logger.log("Error processing audio file: " + e.getMessage());
+            long duration = System.currentTimeMillis() - startTime;
+            
+            // Structured logging - error
+            logStructured(logger, "ERROR", "Processing failed", Map.of(
+                "requestId", requestId,
+                "error", e.getMessage(),
+                "errorType", e.getClass().getSimpleName(),
+                "durationMs", duration,
+                "timestamp", System.currentTimeMillis()
+            ));
+            
             throw new RuntimeException("Audio processing failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Helper method for structured JSON logging
+     */
+    private void logStructured(LambdaLogger logger, String level, String message, Map<String, Object> data) {
+        try {
+            Map<String, Object> logEntry = new HashMap<>(data);
+            logEntry.put("level", level);
+            logEntry.put("message", message);
+            logger.log(objectMapper.writeValueAsString(logEntry) + "\n");
+        } catch (JsonProcessingException e) {
+            // Fallback to simple logging if JSON serialization fails
+            logger.log(String.format("[%s] %s: %s\n", level, message, data.toString()));
         }
     }
 }
