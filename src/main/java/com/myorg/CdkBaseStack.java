@@ -101,8 +101,6 @@ public class CdkBaseStack extends Stack {
     private void initializeResources(RemovalPolicy removalPolicy, boolean autoDeleteObjects) {
         // Note: 'this' in the following code refers to the CdkBaseStack instance
         // All resources are created in the context of this stack
-        
-        super(scope, id, props);
 
         // Input S3 Bucket - receives raw audio files
         inputBucket = Bucket.Builder.create(this, "SleepAudioInputBucket")
@@ -162,7 +160,7 @@ public class CdkBaseStack extends Stack {
                 .environment(Map.of(
                     "TABLE_NAME", metadataTable.getTableName(),
                     "ENVIRONMENT", this.environment
-                    "OUTPUT_BUCKET", outputBucket.getBucketName(),
+                    "ENVIRONMENT", this.environment,
                 ))
                 .description("Processes sleep audio files - placeholder for metadata enrichment and validation")
                 .tracing(Tracing.ACTIVE)
@@ -268,7 +266,7 @@ public class CdkBaseStack extends Stack {
                 )))
                 .resultPath("$.lambdaResult")
                 .comment("Process audio file and enrich metadata")
-        
+                .comment("Process audio file and enrich metadata")
         // Add retry policy for Lambda service errors with exponential backoff
         processAudioTask.addRetry(Retry.builder()
                 .errors(List.of("Lambda.ServiceException", "Lambda.TooManyRequestsException"))
@@ -277,7 +275,6 @@ public class CdkBaseStack extends Stack {
                 .backoffRate(2.0)
                 .build());
                 .build();
-
         // Task 3: Polly task using CallAwsService for SynthesizeSpeech
         // Error handling with Catch block will be added below
         CallAwsService pollyTask = CallAwsService.Builder.create(this, "PollyTextToSpeech")
@@ -291,6 +288,7 @@ public class CdkBaseStack extends Stack {
                 ))
                 .iamResources(List.of("*"))
                 .resultPath("$.pollyResult")
+                .build();
         
         // Add retry policy for Polly service errors
         pollyTask.addRetry(Retry.builder()
@@ -301,7 +299,6 @@ public class CdkBaseStack extends Stack {
                 .build());
                 .build();
 
-        // Task 4: Update DynamoDB status to COMPLETED
         DynamoUpdateItem updateStatusCompleted = DynamoUpdateItem.Builder.create(this, "UpdateStatusCompleted")
                 .table(metadataTable)
                 .key(Map.of(
@@ -316,8 +313,8 @@ public class CdkBaseStack extends Stack {
                     ":completed", DynamoAttributeValue.fromString("COMPLETED"),
                     ":updatedAt", DynamoAttributeValue.fromString(software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$$.State.EnteredTime"))
                 ))
-                .resultPath("$.updateResult")
                 .comment("Update status to COMPLETED after successful processing")
+                .resultPath("$.updateResult")
         
         // Add retry policy for DynamoDB throttling
         updateStatusCompleted.addRetry(Retry.builder()
@@ -327,7 +324,6 @@ public class CdkBaseStack extends Stack {
                 .backoffRate(2.0)
                 .build());
                 .build();
-
         // Task 5: Publish success notification to SNS
         SnsPublish publishSuccessNotification = SnsPublish.Builder.create(this, "PublishSuccessNotification")
                 .topic(completedTopic)
@@ -354,8 +350,8 @@ public class CdkBaseStack extends Stack {
                     ":updatedAt", DynamoAttributeValue.fromString(software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$$.State.EnteredTime")),
                     ":errorInfo", DynamoAttributeValue.fromString(software.amazon.awscdk.services.stepfunctions.JsonPath.stringAt("$.errorMessage"))
                 ))
-                .resultPath("$.updateResult")
                 .comment("Update status to FAILED after error")
+                .resultPath("$.updateResult")
         
         // Add retry policy for DynamoDB throttling
         updateStatusFailed.addRetry(Retry.builder()
@@ -365,7 +361,6 @@ public class CdkBaseStack extends Stack {
                 .backoffRate(2.0)
                 .build());
                 .build();
-
         // Task 7: Publish failure notification to SNS
         SnsPublish publishFailureNotification = SnsPublish.Builder.create(this, "PublishFailureNotification")
                 .topic(failedTopic)

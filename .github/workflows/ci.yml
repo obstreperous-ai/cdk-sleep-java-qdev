@@ -37,11 +37,17 @@ jobs:
     - name: Run Maven tests
       run: mvn clean test
 
+    - name: Generate coverage report
+      run: mvn jacoco:report
+
+    - name: Display coverage summary
+      run: |
+        echo "Coverage report generated at target/site/jacoco/index.html"
+        if [ -f target/site/jacoco/index.html ]; then echo "✅ Coverage report created successfully"; fi
+
     - name: Build Maven package
       run: mvn package
 
     - name: CDK Synth
       run: cdk synth
 
-    - name: Verify output
-      run: ls -la cdk.out/
