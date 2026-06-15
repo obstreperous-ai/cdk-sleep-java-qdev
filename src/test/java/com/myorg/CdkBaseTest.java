@@ -718,14 +718,6 @@ public class CdkBaseTest {
         template.resourceCountIs("AWS::KMS::Key", 1);
     }
 
-    /**
-     * Test: Lambda function should be integrated in state machine workflow
-     */
-    @Test
-    public void testLambdaIntegratedInWorkflow() {
-        App app = new App();
-        CdkBaseStack stack = new CdkBaseStack(app, "TestStack");
-        Template template = Template.fromStack(stack);
 
     // ======================================================================
     // Issue #7: Lambda Function Skeleton + Step Functions Integration (TDD)
