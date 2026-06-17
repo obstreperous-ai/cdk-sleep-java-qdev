@@ -1,13 +1,70 @@
 # cdk-sleep-java-qdev
 
 [![CI](https://github.com/<org>/cdk-sleep-java-qdev/actions/workflows/ci.yml/badge.svg)](https://github.com/<org>/cdk-sleep-java-qdev/actions)
-[![Test Coverage](https://img.shields.io/badge/coverage-80%2B-brightgreen)](https://github.com/<org>/cdk-sleep-java-qdev)
+[![Test Coverage](https://img.shields.io/badge/coverage-82%25-brightgreen)](#testing)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Java](https://img.shields.io/badge/Java-17-orange.svg)](https://openjdk.java.net/)
+[![AWS CDK](https://img.shields.io/badge/AWS%20CDK-2.x-232F3E.svg)](https://aws.amazon.com/cdk/)
+[![TDD](https://img.shields.io/badge/TDD-Strict-success.svg)](#testing)
+[![AI Assisted](https://img.shields.io/badge/AI-Q%20Developer-blueviolet.svg)](#experiment-design)
 
 **A production-ready, event-driven serverless audio processing pipeline built with AWS CDK (Java) using strict Test-Driven Development (TDD) and AI-assisted development.**
 
-> 🧪 **Part of the TDD Infrastructure as Code Experiment Series**  
-> This project explores TDD applied to IaC across 5 languages × 3 AI agents. See [EXPERIMENT.md](EXPERIMENT.md) for the comprehensive experiment design.
+---
+
+## 🧪 **This is an AI-Driven TDD Experiment**
+
+> **IMPORTANT**: This project is not just infrastructure code—it's a **controlled research experiment** exploring whether Test-Driven Development can be effectively applied to Infrastructure as Code with AI assistance.
+
+```mermaid
+graph LR
+    A[Research Question:<br/>Can TDD work for IaC?] --> B[Methodology:<br/>Strict TDD + AI]
+    B --> C[Implementation:<br/>17 Issues, 70+ Tests]
+    C --> D[Self-Evaluation:<br/>8.5/10 Rating]
+    D --> E[You Decide:<br/>Review Evidence]
+    
+    style A fill:#FFE082,stroke:#F57F17,color:#000
+    style B fill:#81C784,stroke:#388E3C,color:#fff
+    style C fill:#64B5F6,stroke:#1976D2,color:#fff
+    style D fill:#BA68C8,stroke:#7B1FA2,color:#fff
+    style E fill:#FF8A65,stroke:#D84315,color:#fff
+```
+
+### 🎯 Experimental Setup
+
+| Dimension | Value | Status |
+|-----------|-------|--------|
+| **Language** | Java 17 + AWS CDK | ✅ |
+| **AI Agent** | Amazon Q Developer | ✅ |
+| **Methodology** | Strict TDD (test-first) | ✅ |
+| **Issues Completed** | 17 (including this polish) | ✅ |
+| **Test Coverage** | 82% (target: 80%+) | ✅ |
+| **Total Tests** | 70+ comprehensive tests | ✅ |
+| **Self-Graded Rating** | 8.5/10 - Highly Successful | ✅ |
+
+### 🔬 Key Research Questions
+
+1. ✅ **Can TDD be applied to Infrastructure as Code?**  
+   → Yes, CDK Assertions enable comprehensive testing
+
+2. ✅ **Does AI assistance accelerate TDD workflows?**  
+   → Yes, Q Developer effectively suggests tests and implementations
+
+3. ✅ **Can documentation stay synchronized?**  
+   → Yes, when made mandatory in the development workflow
+
+4. ✅ **Does issue-driven development scale?**  
+   → Yes, 17 issues provided clear structure and progress tracking
+
+5. ✅ **Are meta-patterns extractable and reusable?**  
+   → Yes, 9 meta-patterns identified in [META_PATTERNS.md](META_PATTERNS.md)
+
+### 📖 **Draw Your Own Conclusions**
+
+All experiment data, observations, and self-evaluations are transparent and documented. Review the evidence:
+- **[EXPERIMENT.md](EXPERIMENT.md)** - Complete methodology and observations
+- **[FINAL-REPORT.md](FINAL-REPORT.md)** - Honest self-evaluation with grading rubric
+- **This README** - Technical implementation details and test results
 
 ---
 
@@ -19,6 +76,7 @@
 - [Quick Start](#quick-start)
 - [Documentation](#documentation)
 - [Development](#development)
+- [TDD Workflow](#tdd-workflow)
 - [Testing](#testing)
 - [Deployment](#deployment)
 - [Project Status](#project-status)
@@ -42,8 +100,8 @@
 **Built with**:
 - ☕ **Java 17** + AWS CDK for type-safe infrastructure
 - 🧪 **Strict TDD** (80%+ test coverage, 70+ tests)
-- 🤖 **AI-Assisted** development with Amazon Q Developer
-- 📝 **Issue-Driven** development (12 completed issues)
+- 🤖 **AI-Assisted** development (Amazon Q Developer)
+- 📝 **Issue-Driven** development (17 completed issues)
 - 📐 **Architecture-as-Code** with Mermaid diagrams
 
 ---
@@ -176,6 +234,39 @@ cdk deploy --context environment=prod
 This project follows **strict Test-Driven Development (TDD)**:
 
 ### TDD Workflow
+---
+
+## TDD Workflow
+
+The entire project was built following strict TDD principles with AI assistance:
+
+```mermaid
+graph TB
+    Start([New Feature/Issue]) --> Red[🔴 RED: Write Failing Test]
+    Red --> |Test Fails| Green[🟢 GREEN: Write Minimal Code]
+    Green --> |Test Passes| Refactor[🔵 REFACTOR: Improve Code]
+    Refactor --> Check{More Tests<br/>Needed?}
+    Check -->|Yes| Red
+    Check -->|No| Doc[📝 Update Documentation]
+    Doc --> Commit[✅ Commit + Push]
+    Commit --> CI[🤖 CI Validates]
+    CI --> Done([Issue Complete])
+    
+    style Start fill:#E1BEE7,stroke:#8E24AA,color:#000
+    style Red fill:#FFCDD2,stroke:#D32F2F,color:#000
+    style Green fill:#C8E6C9,stroke:#388E3C,color:#000
+    style Refactor fill:#BBDEFB,stroke:#1976D2,color:#000
+    style Doc fill:#FFF9C4,stroke:#F57F17,color:#000
+    style Commit fill:#C5E1A5,stroke:#689F38,color:#000
+    style CI fill:#B2DFDB,stroke:#00796B,color:#000
+    style Done fill:#A5D6A7,stroke:#388E3C,color:#000
+```
+
+**Every single feature** in this project followed this exact workflow:
+- ✅ Tests written **before** implementation (not after)
+- ✅ AI (Q Developer) assisted with both test and implementation suggestions
+- ✅ No code merged without passing tests and updated documentation
+
 
 1. **RED**: Write failing test first
 2. **GREEN**: Write minimal code to pass test
@@ -269,7 +360,7 @@ cdk destroy
 
 **Status**: ✅ **Complete and Production-Ready**  
 **Version**: 1.0 (Final Release)  
-**Issues Completed**: 16 (including experiment documentation and final self-evaluation)  
+**Issues Completed**: 17 (including final polish)  
 **Test Coverage**: 80%+  
 **Total Tests**: 70+  
 **Development Approach**: Strict TDD + Issue-Driven + AI-Assisted
@@ -286,7 +377,7 @@ cdk destroy
 - ✅ Complete documentation (8 documents)
 - ✅ Experiment design documentation
 - ✅ Final self-evaluation report (Rating: 8.5/10)
-
+- ✅ Final self-evaluation and visual polish
 ### Future Enhancements
 
 - 🔄 Advanced audio processing (noise reduction, normalization)
@@ -300,11 +391,40 @@ cdk destroy
 ## Experiment Design
 
 ### 🧪 This is an Experimental Research Project
-
+### 🧪 Understanding This Experiment
 **cdk-sleep-java-qdev** is part of a larger experiment exploring:
-
+This project serves dual purposes:
+1. **A working serverless audio processing pipeline** (production-ready)
+2. **A research artifact** demonstrating TDD applied to IaC with AI assistance
 **Research Question**: Can strict TDD be effectively applied to Infrastructure as Code with AI assistance?
+### Experiment Methodology Diagram
 
+```mermaid
+graph TB
+    subgraph "Phase 1: Setup"
+        A[Define Research Questions] --> B[Create Issue List]
+        B --> C[Establish TDD Rules]
+    end
+    
+    subgraph "Phase 2: Implementation"
+        C --> D[Issue-Driven Development]
+        D --> E[Write Test First]
+        E --> F[AI Suggests Implementation]
+        F --> G[Refactor + Document]
+        G --> H{More Issues?}
+        H -->|Yes| D
+        H -->|No| I[Complete]
+    end
+    
+    subgraph "Phase 3: Evaluation"
+        I --> J[Self-Grade Against Rubric]
+        J --> K[Document Findings]
+        K --> L[Publish Transparently]
+    end
+    
+    style A fill:#FFE082,stroke:#F57F17,color:#000
+    style J fill:#BA68C8,stroke:#7B1FA2,color:#fff
+```
 **Experimental Matrix**: 5 Languages × 3 AI Agents
 
 | Language | AI Agent | Status |
@@ -317,20 +437,40 @@ cdk destroy
 
 ### Key Findings (Java + Q Developer)
 
+
+**✅ Successes:**
+1. **TDD works exceptionally well for IaC** - CDK Assertions enable comprehensive infrastructure testing
+2. **AI accelerates TDD significantly** - Q Developer effectively suggests tests, implementations, and refactorings
+3. **Documentation can stay synchronized** - When made mandatory in the workflow (not optional)
+4. **Issue-driven development scales well** - 17 issues provided clear structure and progress tracking
+5. **Meta-patterns are extractable** - 9 reusable patterns identified and documented
+
+**⚠️ Challenges:**
+1. **Initial learning curve** - Understanding how to test infrastructure took time
+2. **AI suggestions need validation** - Not all suggestions were correct or optimal
+3. **Documentation overhead** - Keeping 8+ documents synchronized required discipline
+
+### Self-Grading Results
+
+The project was evaluated against a comprehensive rubric covering:
+- TDD adherence and test quality
+- AI effectiveness and integration
+- Documentation completeness and accuracy
+- Production readiness and code quality
+- Experiment methodology and transparency
 1. ✅ **TDD works for IaC**: CDK Assertions enable comprehensive infrastructure testing
-2. ✅ **AI accelerates TDD**: Q Developer effectively suggests tests and implementations
-3. ✅ **Documentation stays synchronized**: When made mandatory in workflow
-4. ✅ **Issue-driven development scales**: 12 issues provided clear structure
-5. ✅ **Meta-patterns are extractable**: 9 reusable patterns identified
-
+**Final Rating: 🟢 8.5/10 - Highly Successful**
 ### Final Evaluation Results
-
-**Overall Project Rating**: 🟢 **8.5/10 - Highly Successful**
-
+See [FINAL-REPORT.md](FINAL-REPORT.md) for the complete self-evaluation with detailed scoring.
 - ✅ All research questions validated
-- ✅ 82% test coverage (exceeds 80% target)
-- ✅ Zero technical debt, zero reopened issues
+### 📊 How to Interpret These Results
 
+**This is a self-evaluation** - I'm rating my own work. Consider:
+- ✅ All data is transparent (code, tests, documentation)
+- ✅ Methodology is documented and reproducible
+- ⚠️ Inherent bias in self-assessment (be critical!)
+- 🤔 Compare against the rubric in FINAL-REPORT.md
+- 🤔 Review the actual code and tests yourself
 **📖 Read the complete reports: [EXPERIMENT.md](EXPERIMENT.md) | [FINAL-REPORT.md](FINAL-REPORT.md)**
 
 ---
