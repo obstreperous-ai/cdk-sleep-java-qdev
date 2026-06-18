@@ -40,11 +40,37 @@ jobs:
     - name: Generate coverage report
       run: mvn jacoco:report
 
-    - name: Display coverage summary
+    - name: Extract coverage percentage
+      id: coverage
       run: |
-        echo "Coverage report generated at target/site/jacoco/index.html"
-        if [ -f target/site/jacoco/index.html ]; then echo "✅ Coverage report created successfully"; fi
+        if [ -f target/site/jacoco/index.html ]; then
+          echo "✅ Coverage report created successfully"
+          
+          # Extract coverage percentage from JaCoCo report
+          COVERAGE=$(grep -oP 'Total[^%]*?(\d+)%' target/site/jacoco/index.html | grep -oP '\d+' | head -1 || echo "0")
+          echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+          echo "📊 Code Coverage: ${COVERAGE}%"
+        else
+          echo "coverage=0" >> $GITHUB_OUTPUT
+          echo "⚠️ Coverage report not found"
+        fi
 
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: target/site/jacoco/
+        retention-days: 30
+
+    - name: Add coverage to job summary
+      run: |
+        echo "## 📊 Test Coverage Report" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Coverage:** ${{ steps.coverage.outputs.coverage }}%" >> $GITHUB_STEP_SUMMARY
+        echo "**Target:** 80%+" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "📥 Download the full coverage report from the workflow artifacts." >> $GITHUB_STEP_SUMMARY
+        
     - name: Build Maven package
       run: mvn package
 
